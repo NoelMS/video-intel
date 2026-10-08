@@ -118,6 +118,15 @@ const person = (n, t, x) => ({ n, t, lighting: 'good', objects: [{ type: 'person
 const tr = indexer.track([person(1, 0, 100), person(2, 2, 110), person(3, 4, 400), person(4, 30, 405)], 6);
 assert.deepEqual(tr.map(t => t.dets.map(d => d.n)), [[1, 2], [3], [4]], 'overlap links, a jump or a long gap starts a new track');
 
+// vision model replies: JSON in content (Ollama 0.40) or in thinking after reasoning (0.31), never the reasoning itself
+{
+  const { jsonIn } = await import('./indexer.mjs');
+  assert.deepEqual(jsonIn('{"objects":[]}'), { objects: [] });
+  assert.deepEqual(jsonIn('<think>\nGo look {not json}</think>\n{"objects":[1]}'), { objects: [1] });
+  assert.equal(jsonIn('<think>\nSo, the frame shows a bus {maybe}'), null, 'unfinished reasoning is not parsed as JSON');
+  assert.equal(jsonIn(''), null);
+}
+
 // installer downloads resume after a dropped connection and still hash the whole file
 {
   const { createServer } = await import('node:http'), { createHash, randomBytes } = await import('node:crypto');

@@ -104,7 +104,7 @@ export const DEFAULT_SETTINGS = {
   pipeline: { sampling: 0.5, refinement: 4 },             // frames per second sampled from recordings
   privacy: { faces: true, plates: true, onPrem: true, retentionDays: 30, expiryDays: 90, exports: 'watermarked' },
   operator: { role: 'analyst' },
-  vision: { model: 'qwen3-vl:2b', setupSeen: false },   // local analysis via Ollama (setup.mjs)
+  vision: { model: 'qwen3-vl:2b-instruct', setupSeen: false },   // local analysis via Ollama (setup.mjs)
 };
 export const ROLES = ['viewer', 'analyst', 'supervisor'];
 export const EXPORTS = { allowed: 'Allowed', watermarked: 'Watermarked', disabled: 'Disabled' };

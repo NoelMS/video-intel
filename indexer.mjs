@@ -74,7 +74,7 @@ export function reindex(id) {
 }
 
 // ---------- queue (one video at a time; survives restarts because state is persisted) ----------
-let current = null, opts = { model: 'qwen3-vl:2b', sampling: 0.5, describe: null };   // describe: test hook
+let current = null, opts = { model: 'qwen3-vl:2b-instruct', sampling: 0.5, describe: null };   // describe: test hook
 export const configure = o => { opts = { ...opts, ...o }; };
 export const busy = () => !!current;
 
@@ -146,18 +146,28 @@ const SCHEMA = {
     lighting: { enum: ['good', 'low', 'night'] },
   },
 };
-const PROMPT = `Index this CCTV frame. List each person, vehicle, animal and carried bag once: type; a short label naming colours and clothing, carried items or vehicle body type (e.g. "woman in red jacket with black backpack", "white delivery van"); box [x1, y1, x2, y2] in 0-1000 image coordinates; action. Then boxes of clearly visible faces and licence plates, and the lighting. Only what you can see.`;
+// No example labels: the 2B model copied them verbatim onto unrelated people.
+const PROMPT = `Index this CCTV frame. List each distinct person, vehicle, animal and carried bag exactly once: type; a short label with its actual colours and clothing, carried items or vehicle body type; box [x1, y1, x2, y2] in 0-1000 image coordinates; action. Then boxes of clearly visible faces and licence plates, and the lighting. Only what you can see; never repeat an object.`;
 
 async function chat(images, prompt, format) {
   const res = await fetch(setup.OLLAMA + '/api/chat', { method: 'POST', body: JSON.stringify({
     // num_ctx: one frame plus the prompt is ~1-2K tokens; the model's 256K default would not fit in memory.
-    // think: false: Qwen3-VL reasons before answering by default, which costs ~40 s a frame for no gain here.
+    // Use the -instruct tags: plain qwen3-vl:2b is the thinking variant, and on Ollama 0.40 it ignores think: false and
+    // /no_think once a schema is set, reasoning until num_ctx runs out (2,940 tokens, 110 s, no JSON).
     model: opts.model, stream: false, format, think: false, keep_alive: '10m', options: { temperature: 0, num_ctx: 4096 },
     messages: [{ role: 'user', content: prompt, images }] }) });
   if (!res.ok) throw new Error(`Ollama ${res.status}: ${(await res.text()).slice(0, 200)}`);
-  // With a schema, Ollama 0.31 returns this model's JSON in `thinking` and leaves `content` empty; accept either.
+  // Older Ollama put a thinking model's JSON in `thinking` with `content` empty, so look in both.
   const m = (await res.json()).message;
-  return JSON.parse(m.content?.trim() || m.thinking);
+  for (const text of [m.content, m.thinking]) { const j = jsonIn(text); if (j) return j; }
+  throw new Error(m.thinking
+    ? `${opts.model} spent its whole reply reasoning. Pick an -instruct model (e.g. qwen3-vl:2b-instruct) in System → Local analysis.`
+    : 'The vision model did not return JSON. Try again, or pick another model in System → Local analysis.');
+}
+export function jsonIn(text) {
+  const t = String(text ?? '').replace(/<think>[\s\S]*?(<\/think>|$)/g, '').trim(), i = t.indexOf('{');
+  if (i < 0) return null;
+  try { return JSON.parse(t.slice(i, t.lastIndexOf('}') + 1)); } catch { return null; }
 }
 
 // 0-1000 corner boxes -> [x, y, w, h] in the app's 640x360 frame space
@@ -167,8 +177,10 @@ const toFrame = b => {
   return [a * 0.64, bb * 0.36, (c - a) * 0.64, (d - bb) * 0.36].map(n => +n.toFixed(1));
 };
 
-// Small models sometimes list one object twice; same type with heavily overlapping boxes is the same object.
-const dedupe = os => os.filter((o, i) => !os.slice(0, i).some(p => p.type === o.type && iou(p.box, o.box) > 0.7));
+// Small models sometimes list one object twice (same type, heavily overlapping boxes), or fall into a loop that repeats
+// one label with an identical-size box stepped sideways; both are dropped.
+const sameSize = (a, b) => Math.abs(a[2] - b[2]) < 1 && Math.abs(a[3] - b[3]) < 1;
+const dedupe = os => os.filter((o, i) => !os.slice(0, i).some(p => p.type === o.type && (iou(p.box, o.box) > 0.7 || (p.label === o.label && sameSize(p.box, o.box)))));
 
 export async function describeFrame(b64) {
   const r = await chat([b64], PROMPT, SCHEMA);
