@@ -601,6 +601,8 @@ dialog.setup { width: min(760px, 96vw); }
 
 /* public cameras and archives */
 dialog.sources { width: min(1100px, 96vw); }
+dialog.capture { width: min(560px, 96vw); } dialog.capture .ev-top .txt { white-space: nowrap; }
+.capture-form .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; } .capture-form input[type=number] { width: 6em; }
 .srcbody { display: grid; gap: 16px; }
 .srcbody > .dim { max-width: 72ch; font-size: 14px; }
 .src-controls { display: flex; flex-wrap: wrap; gap: 12px 18px; align-items: center; }

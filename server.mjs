@@ -127,6 +127,7 @@ async function migrateModel() {
 // Live feeds and archive imports (sources.mjs). Directory cameras arrive with their public URLs; any URL is limited to
 // http(s)/rtsp and the import extension allow-list, and MEVA keys must match the archive's own file naming.
 const validTz = tz => { try { new Intl.DateTimeFormat('en', { timeZone: tz }); return tz; } catch { bad('unknown timezone'); } };
+const validClipSec = s => { if (!(+s >= 5 && +s <= 300)) bad('clipSec must be 5-300'); return Math.round(+s); };
 function validFeeds(b) {
   if (!Array.isArray(b.items) || !b.items.length || b.items.length > 100) bad('items must be 1-100 cameras');
   return b.items.map(i => {
@@ -251,9 +252,10 @@ const routes = [
     const b = await body(req), patch = {};
     if ('active' in b) { if (typeof b.active !== 'boolean') bad('active must be boolean'); patch.active = b.active; patch.state = b.active ? 'Resumed' : 'Paused'; }
     if ('intervalMin' in b) { if (!(+b.intervalMin >= 2 && +b.intervalMin <= 1440)) bad('intervalMin must be 2-1440'); patch.intervalMin = +b.intervalMin; }
+    if ('clipSec' in b) patch.clipSec = validClipSec(b.clipSec);
     sources.updateFeed(id, patch); return ingest();
   }],
-  ['POST', /^feeds\/([\w-]+)\/capture$/, (_, [id]) => { sources.captureNow(id); return ingest(); }],
+  ['POST', /^feeds\/([\w-]+)\/capture$/, async (req, [id]) => { const b = await body(req); sources.captureNow(id, b.clipSec == null ? null : validClipSec(b.clipSec)); return ingest(); }],
   ['DELETE', /^feeds\/([\w-]+)$/, (_, [id]) => { sources.removeFeed(id); return ingest(); }],
   ['POST', /^imports$/, async req => { sources.addImports(validImports(await body(req))); return ingest(); }],
   ['DELETE', /^imports$/, () => { sources.clearImports(); return ingest(); }],

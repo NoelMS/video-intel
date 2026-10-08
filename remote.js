@@ -82,7 +82,7 @@ export const sourcesCaltrans = d => j('sources/caltrans/' + d);
 export const sourcesMeva = prefix => j('sources/meva?prefix=' + encodeURIComponent(prefix));
 export const addFeeds = items => j('feeds', { method: 'POST', body: { items } });
 export const updateFeed = (id, patch) => j('feeds/' + id, { method: 'PUT', body: patch });
-export const captureFeed = id => j(`feeds/${id}/capture`, { method: 'POST' });
+export const captureFeed = (id, clipSec) => j(`feeds/${id}/capture`, { method: 'POST', body: clipSec ? { clipSec } : {} });
 export const removeFeed = id => j('feeds/' + id, { method: 'DELETE' });
 export const addImports = body => j('imports', { method: 'POST', body });
 export const clearImports = () => j('imports', { method: 'DELETE' });

@@ -247,6 +247,16 @@ ES modules need an http origin. Opening `index.html` from disk will not work.
   - `dur()` now formats hours.
   - **Verified** on a copy of the real store with live capture paused: "Find the white car" gives 8 plausible matches (3 compared + 5 listed); the header window is 09:00 → 22:06 GMT+5:30.
 
+- **Capture now opens a window** (`captureLayer`, `submitCapture` in app.js):
+  - **Record for**: 5-300 s, streams only. A TfL camera publishes fixed ~10 s clips, so its window says so and offers no length.
+  - **Schedule**: capture every N minutes (2-1440), plus a checkbox (on by default) to record this long on every scheduled capture too.
+  - **Server**: schedule changes go through `PUT feeds/:id` (now also accepting `clipSec`, validated 5-300 by `validClipSec`). The capture itself is `POST feeds/:id/capture {clipSec}`.
+  - **One-off length**: `captureFeed(f, clipSec)` passes it to that capture only, so a one-off length never becomes the stored clip length. The feed row shows "every 5 min for 15 s" for streams.
+  - **Verified in the browser** on a fresh store, with a Caltrans stream and a TfL camera:
+    - A 15 s capture saved to the schedule recorded 15.0 s and stored every 5 min / 15 s.
+    - An 8 s one-off with the box unticked recorded 8.0 s and kept 15 s stored.
+    - The TfL window had no length field, and setting every 3 min worked.
+
 ## Footage sources (researched)
 
 Live feeds (for the live-ingest stretch goal; all free, check each licence before redistributing):

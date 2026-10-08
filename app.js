@@ -567,7 +567,7 @@ dlg.addEventListener('close', () => {
   S.layer = null; S.reveal = false; dlg.innerHTML = '';
 });
 
-const LAYERS = { sources: () => sourcesLayer(), setup: () => setupLayer(), intro: () => introLayer(), register: () => registerLayer(), video: L => videoLayer(L), diag: () => diagLayer(), evidence: evidenceLayer, compare: compareLayer, passport: passportLayer, resolver: () => resolver(S.resolver), palette: () => paletteLayer() };
+const LAYERS = { capture: L => captureLayer(L), sources: () => sourcesLayer(), setup: () => setupLayer(), intro: () => introLayer(), register: () => registerLayer(), video: L => videoLayer(L), diag: () => diagLayer(), evidence: evidenceLayer, compare: compareLayer, passport: passportLayer, resolver: () => resolver(S.resolver), palette: () => paletteLayer() };
 
 function evidenceLayer({ id, off = 0, focus = false }) {
   const e = ev(id), c = cam(e.cameraId), q = S.res?.interp;
@@ -934,6 +934,30 @@ function pickCams() {
     </div>
     <p class="attrib">${tfl ? 'Powered by TfL Open Data. Contains OS data © Crown copyright and database rights.' : 'Caltrans CCTV, California Department of Transportation.'}</p>`;
 }
+// Capture now: how long to record this time, and optionally the camera's schedule (how often, how long each time).
+// A TfL camera only publishes fixed ~10 s clips, so only its schedule can change.
+function captureLayer({ id }) {
+  const f = S.ingest.feeds.find(x => x.id === id), stream = f.kind === 'stream';
+  return `<header class="ev-top"><p class="eyebrow">CAPTURE NOW · ${esc(f.name)}</p><button class="txt" data-act="close">Close · Esc</button></header>
+    <form class="reg capture-form" data-form="capture" data-id="${f.id}">
+      ${stream ? `<label class="fld">Record for<span class="row"><input type="number" name="len" min="5" max="300" step="1" value="${f.clipSec}" required> seconds</span><span class="dim">5 seconds to 5 minutes. Longer clips take longer to index.</span></label>`
+        : `<p class="dim">This camera publishes a short clip (about 10 seconds) every minute or so; Capture now fetches the newest one.</p>`}
+      <fieldset><legend class="eyebrow">SCHEDULE</legend>
+        <label class="fld">Capture every<span class="row"><input type="number" name="every" min="2" max="1440" step="1" value="${f.intervalMin}" required> minutes</span></label>
+        ${stream ? `<label class="opt"><input type="checkbox" name="keep" checked> <span>Record this long on every scheduled capture too (now ${f.clipSec} s)</span></label>` : ''}
+      </fieldset>
+      <div class="acts"><button class="btn primary">Capture now</button><button type="button" class="txt" data-act="close">Cancel</button></div>
+    </form>`;
+}
+async function submitCapture(form) {
+  const f = S.ingest.feeds.find(x => x.id === form.dataset.id), fd = new FormData(form), len = +fd.get('len') || null, every = +fd.get('every');
+  const patch = { ...(every !== f.intervalMin ? { intervalMin: every } : {}), ...(fd.get('keep') && len !== f.clipSec ? { clipSec: len } : {}) };
+  if (Object.keys(patch).length) await api.updateFeed(f.id, patch);
+  S.ingest = await api.captureFeed(f.id, len);
+  dlg.close(); render(); pollVideos();
+  toast(`Capturing ${f.kind === 'stream' ? `${len} s of ` : ''}${f.name}${Object.keys(patch).length ? ' · schedule updated' : ''}`);
+}
+
 function streamForm() {
   return `<form class="reg" data-form="stream"><p class="dim">Any camera that publishes an HLS (.m3u8) or RTSP stream, or a short MP4 it keeps replacing. Each capture records one clip.</p>
     <label class="fld">Stream or clip URL<input name="url" required placeholder="https://…/playlist.m3u8 or rtsp://…" pattern="(https?|rtsp)://.+"></label>
@@ -1003,7 +1027,7 @@ function ingestPanel() {
   return `${b.clips ? `<p class="backlog"><b>Indexing backlog</b> · ${b.clips} clip${b.clips === 1 ? '' : 's'} · ${hmsDur(b.seconds)} of footage${b.eta ? ` · up to ${hmsDur(b.eta)} at ${b.secPerFrame.toFixed(1)} s a frame (measured)` : ''}${b.clips >= ig.maxBacklog ? ' · live captures pause until it clears' : ''}</p>` : ''}
     ${ig.feeds.length ? `<section class="feeds"><p class="eyebrow">LIVE CAMERAS · capturing while the app is open</p><ol>${ig.feeds.map(f => `<li class="feed ${f.active ? '' : 'paused'}">
       ${f.image ? `<img loading="lazy" src="${esc(f.image)}" alt="">` : '<span class="noimg"></span>'}
-      <div><p class="cn">${esc(f.name)}</p><p class="mono dim">${esc(FEED_KIND[f.provider] || 'Stream')} · every ${f.intervalMin} min · ${f.captures} capture${f.captures === 1 ? '' : 's'}</p>
+      <div><p class="cn">${esc(f.name)}</p><p class="mono dim">${esc(FEED_KIND[f.provider] || 'Stream')} · every ${f.intervalMin} min${f.kind === 'stream' ? ` for ${f.clipSec} s` : ''} · ${f.captures} capture${f.captures === 1 ? '' : 's'}</p>
         <p class="mono ${f.lastError ? 'warn' : 'dim'}">${f.active ? esc(f.state) : 'Paused'}${f.last ? ` · last ${new Date(f.last).toLocaleTimeString('en-GB')}` : ''}${f.lastError ? ` · ${esc(f.lastError)}` : ''}</p></div>
       <div class="acts"><button class="txt" data-act="feed-capture" data-id="${f.id}" ${f.capturing ? 'disabled' : ''}>${f.capturing ? 'Capturing…' : 'Capture now'}</button><button class="txt" data-act="feed-toggle" data-id="${f.id}" data-on="${f.active ? 0 : 1}">${f.active ? 'Pause' : 'Resume'}</button><button class="txt danger" data-act="feed-del" data-id="${f.id}">Remove</button></div></li>`).join('')}</ol>
       <p class="attrib">${[...new Set(ig.feeds.map(f => ig.attribution[f.provider]).filter(Boolean))].join(' ')}</p></section>` : ''}
@@ -1418,7 +1442,7 @@ const ACT = {
   'src-add-cams': () => addPickedCams(),
   'meva-go': d => { SRC.mevaPrefix = d.prefix; loadSourceList(); },
   'meva-import': () => importMeva(),
-  'feed-capture': async d => { S.ingest = await api.captureFeed(d.id); render(); pollVideos(); },
+  'feed-capture': d => openLayer({ kind: 'capture', id: d.id }),
   'feed-toggle': async d => { S.ingest = await api.updateFeed(d.id, { active: d.on === '1' }); render(); pollVideos(); },
   'feed-del': async d => { if (!confirm('Stop capturing this camera? Clips already indexed stay.')) return; S.ingest = await api.removeFeed(d.id); render(); },
   'imports-clear': async () => { S.ingest = await api.clearImports(); render(); },
@@ -1486,6 +1510,7 @@ document.addEventListener('submit', e => {
   if (e.target.dataset.form === 'register') { e.preventDefault(); return uploadFootage(e.target); }
   if (e.target.dataset.form === 'stream') { e.preventDefault(); return submitStream(e.target); }
   if (e.target.dataset.form === 'urls') { e.preventDefault(); return submitUrls(e.target); }
+  if (e.target.dataset.form === 'capture') { e.preventDefault(); return submitCapture(e.target); }
   if (e.target.dataset.form !== 'search') return;
   e.preventDefault();
   const fd = new FormData(e.target);

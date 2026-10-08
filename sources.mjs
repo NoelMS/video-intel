@@ -95,19 +95,20 @@ async function tick() {
   }
 }
 // The next timed capture counts from this one, so a forced capture does not get a second clip straight after it.
-function captureFeed(f) {
+function captureFeed(f, clipSec = null) {
   capturing.add(f.id);
   putFeed({ ...f, capturing: true, state: 'Capturing…' });
-  return capture(f).catch(e => ({ lastError: e.message, state: 'Capture failed; retrying next interval' }))
+  return capture(clipSec ? { ...f, clipSec } : f).catch(e => ({ lastError: e.message, state: 'Capture failed; retrying next interval' }))
     .then(patch => { const cur = listFeeds().find(x => x.id === f.id); if (cur) putFeed({ ...cur, ...patch, capturing: false, next: Date.now() + cur.intervalMin * 60e3 }); })
     .finally(() => capturing.delete(f.id));
 }
-// "Capture now": also on a paused camera, and past the backlog limit, since someone asked for it. A TfL camera only
-// publishes a new clip every few minutes, so forcing it early can still answer "No new clip since the last capture".
-export function captureNow(id) {
+// "Capture now": also on a paused camera, and past the backlog limit, since someone asked for it. clipSec sets this
+// capture's length on a stream (a TfL camera's clip is whatever ~10 s it published). A TfL camera only publishes a new
+// clip every minute or so, so forcing it early can still answer "No new clip since the last capture".
+export function captureNow(id, clipSec = null) {
   const f = listFeeds().find(x => x.id === id);
   if (!f) throw Object.assign(new Error('No such camera'), { status: 404 });
-  if (!capturing.has(id)) captureFeed(f);
+  if (!capturing.has(id)) captureFeed(f, f.kind === 'stream' ? clipSec : null);
 }
 let timer = null;
 export const startScheduler = () => { timer ??= setInterval(tick, 15e3); timer.unref?.(); tick(); };
