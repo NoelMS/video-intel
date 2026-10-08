@@ -1,7 +1,7 @@
 // Local-analysis dependencies: ffmpeg (decodes any CCTV codec), Ollama (runs the vision model), and the model.
 // Everything installs per-user into known places, downloads are verified against published SHA-256 sums,
 // and nothing needs admin rights.
-import { createWriteStream, existsSync, mkdirSync, rmSync, readdirSync, copyFileSync, statSync } from 'node:fs';
+import { createWriteStream, createReadStream, existsSync, mkdirSync, rmSync, readdirSync, copyFileSync, statSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { createHash } from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
@@ -61,13 +61,30 @@ export async function status(model) {
 let job = null;
 export const busy = () => job && !job.finished;
 
-async function download(url, file, step) {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Download failed (${res.status}): ${url}`);
-  step.total = +res.headers.get('content-length') || 0; step.done = 0;
-  const hash = createHash('sha256'), out = createWriteStream(file);
-  for await (const chunk of res.body) { hash.update(chunk); step.done += chunk.length; if (!out.write(chunk)) await new Promise(r => out.once('drain', r)); }
-  await new Promise((r, j) => out.end(e => e ? j(e) : r()));
+// Resumes with a Range request when the connection drops (large files on slow links), then hashes the whole file.
+export async function download(url, file, step) {
+  step.done = 0; step.total = 0;
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(url, step.done ? { headers: { range: `bytes=${step.done}-` } } : {}).catch(e => e);
+    const resumed = res.status === 206;
+    if (res instanceof Error || !(res.ok || resumed)) {
+      if (attempt < 8 && !(res.status >= 400 && res.status < 500)) { await new Promise(r => setTimeout(r, 2000)); continue; }
+      throw new Error(`Download failed (${res.status || res.message}): ${url}`);
+    }
+    if (!resumed) { step.done = 0; step.total = +res.headers.get('content-length') || 0; }   // server ignored Range: start over
+    const out = createWriteStream(file, { flags: resumed ? 'a' : 'w' });
+    try {
+      for await (const chunk of res.body) { step.done += chunk.length; if (!out.write(chunk)) await new Promise(r => out.once('drain', r)); }
+      await new Promise((r, j) => out.end(e => e ? j(e) : r()));
+      break;
+    } catch (e) {
+      await new Promise(r => out.end(r));
+      if (attempt >= 8) throw e;
+      await new Promise(r => setTimeout(r, 2000));
+    }
+  }
+  const hash = createHash('sha256');
+  for await (const chunk of createReadStream(file)) hash.update(chunk);
   return hash.digest('hex');
 }
 const expectSum = (actual, expected, what) => {

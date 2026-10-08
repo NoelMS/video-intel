@@ -118,6 +118,23 @@ const person = (n, t, x) => ({ n, t, lighting: 'good', objects: [{ type: 'person
 const tr = indexer.track([person(1, 0, 100), person(2, 2, 110), person(3, 4, 400), person(4, 30, 405)], 6);
 assert.deepEqual(tr.map(t => t.dets.map(d => d.n)), [[1, 2], [3], [4]], 'overlap links, a jump or a long gap starts a new track');
 
+// installer downloads resume after a dropped connection and still hash the whole file
+{
+  const { createServer } = await import('node:http'), { createHash, randomBytes } = await import('node:crypto');
+  const blob = randomBytes(300000); let dropped = false;
+  const ds = createServer((req, res) => {
+    const from = +(/bytes=(\d+)-/.exec(req.headers.range || '')?.[1] || 0);
+    res.writeHead(from ? 206 : 200, { 'content-length': blob.length - from });
+    if (!dropped) { dropped = true; res.write(blob.subarray(0, 120000)); return setTimeout(() => res.socket.destroy(), 50); }
+    res.end(blob.subarray(from));
+  }).listen(0);
+  const { download } = await import('./setup.mjs'), step = {}, file = `${storeDir}/dl.bin`;
+  const sum = await download(`http://127.0.0.1:${ds.address().port}/f`, file, step);
+  assert.equal(sum, createHash('sha256').update(blob).digest('hex'), 'resumed download is byte-identical');
+  assert.equal(step.done, blob.length);
+  ds.close();
+}
+
 // full pipeline on a real (generated) video with ffmpeg, a stand-in for the vision model, and search over it
 const { ffmpegPath } = await import('./setup.mjs');
 if (ffmpegPath()) {
