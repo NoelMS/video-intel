@@ -35,6 +35,10 @@ ES modules need an http origin. Opening `index.html` from disk will not work.
 | `frame.js` | Camera stills as SVG: synthetic scenes for the demo, or the extracted frame for your footage (`realFrame`: nearest frame, the track's box on that exact frame, opaque redaction for faces and plates the model reported). Boxes live in 640x360 space; non-16:9 cameras are scaled vertically by `ky` so they keep their true shape |
 | `setup.mjs` | Local-analysis dependencies: status (ffmpeg, Ollama, model) and a one-at-a-time install job. ffmpeg comes from the gyan.dev essentials zip (SHA-256 verified, unpacked with `System32\tar.exe`; a bare `tar` can be Git's GNU tar, which fails on zip). Ollama comes from the GitHub release `OllamaSetup.exe` (verified against `sha256sum.txt`, `/VERYSILENT` per-user install). The model is fetched with `/api/pull` (streamed progress). The detector: `onnxruntime-node` and `onnxruntime-common` 1.30.0 tarballs from the npm registry and `yolox_s.onnx` from the YOLOX 0.1.1rc0 GitHub release, all pinned by SHA-256, unpacked with `tar.exe` into `.runtime/detector-tmp` and renamed into place; other platforms' runtimes are deleted (100 MB on disk). `migrateModel()` in server.mjs offers it once to installs that predate it (`vision.detectorOffered`) |
 | `detector.mjs` | Object detector: YOLOX-S (Apache-2.0, COCO) on ONNX Runtime from `.runtime/detector`, DirectML on Windows, else CPU. `frames()` reads a JPEG sequence through one ffmpeg as 640x640 letterboxed BGR (YOLOX's own preprocessing; padding grey 114, top-left). `detect()` decodes the raw head output (grid offsets, `exp` sizes, sigmoided objectness x class), keeps person/vehicle/animal/bag classes, runs NMS per class (plus 0.7 across classes of one kind, so a taxi is not both car and truck), and maps boxes to the 640x360 app space. `lighting()` is mean brightness. ~70-105 ms a frame on an RTX 3050 including decode |
+| `embed.mjs` | MobileCLIP-S0 image + text encoders on the detector's ONNX Runtime; CLIP byte-level BPE tokenizer in plain JS; `squareCrop` from the detector's frame buffer. Files `clip_vision.onnx`, `clip_text.onnx`, `clip_tokenizer.json` in `.runtime/detector` (setup installs them) |
+| `baseline.mjs` | `phrase()` (the visual part of a question), `similarities()` (per tracked object: crop cosine, and the best 1/s frame while it is on screen = its moment), `baselineSearch()` (the comparison baseline: CLIP frame retrieval) |
+| `eval/` | `queries.json` (43 queries: 27 from MEVA annotations in `eval/meva/`, 16 hand labels), `build-meva-queries.mjs`, `hand-labels.mjs`, `eval.mjs` (baseline + ablations over HTTP), `results-*.md`. See WRITEUP.md |
+| `WRITEUP.md` | The problem-statement write-up: method, baseline, evaluation, ablation, latency, clarify-once, re-ID, limitations |
 | `indexer.mjs` | Your recordings: streams an upload to `.store/videos`, ffprobe metadata, a resumable queue. ffmpeg samples at `pipeline.sampling` fps with `mpdecimate` (drops static frames) and `showinfo` timestamps. `describeFrame` calls Ollama with a JSON schema. `track()` links detections (overlap or ~1.5 body-lengths, plus agreeing labels). `dataset()` builds the "mine" dataset in `data.js` shape. `linkAcrossCameras` gives "possible" re-identification by shared description words. `verify()` re-checks a candidate frame with the question. Sources the browser cannot play (codec not h264/vp8/vp9/av1, or container not mp4/m4v/webm/mov) first get an H.264 copy at `playFile(v)` (`<id>.play.mp4`, status `transcoding`) |
 | `service.js` | Backend selection: `{ api, mode }`. Pure helpers always from `api.js`, endpoints from `remote.js` when the server answers |
 | `remote.js` | fetch/EventSource client for `server.mjs`, same signatures as `api.js` endpoints |
@@ -317,6 +321,26 @@ ES modules need an http origin. Opening `index.html` from disk will not work.
     - A manifest for two files plus a time-named third gave starts 14:09 / 14:16 / 14:08 UTC, with the two manifest files as one "Gate cam".
     - "Did a white van pass through the main gate?" asked once, then answered after the place was drawn. After a server restart the same question and a different one about the main gate were both answered without asking.
   - `setup.download`: a 416 on a resume when every byte has arrived now counts as complete (a MEVA import failed on it).
+
+- **Phases 4, 6, 7: evaluation, re-ID, real alerts, continuous live, write-up**:
+  - **Evaluation** (`eval/`):
+    - Footage: 8 MEVA cameras (2018-03-07 11:00-11:05, school + bus sites) and 5 TfL clips, indexed by a server whose store is `N:ideo-intel-test\evalstore\store.json`. Run it with `TEMP`/`TMP` on N: as well; C: is nearly full.
+    - Queries: 27 activity queries from MEVA annotations plus 16 hand-labelled attribute queries, alternating dev/held-out.
+    - `eval.mjs` switches the search day per query (MEVA is 2018, TfL 2026).
+    - Ablation switches go through the search request (`ablation: { image, frames, labels, verify, weights }`, evaluation only).
+  - **Results** (all 43 queries, full vs baseline): Hit@1 41.9% vs 30.2%, Hit@5 72.1% vs 46.5%, MRR 0.528 vs 0.363, median time error 0.3 s vs 3.5 s, latency ~5 s vs ~11 ms (~90 ms without verification).
+    - Activities gain most: Hit@5 29.6% to 70.4%. On attributes the baseline is slightly better at Hit@1.
+    - The held-out first run tied on Hit@1; the vocabulary fix (below) was found on held-out output, and both runs are reported in WRITEUP.md.
+  - **Tuning (dev only)**: `OPEN_VOCAB = { object: 0.5, frame: 0, labels: 0.5, pass: 0.75 }`. The frame similarity picks each object's moment (`result.moments`, clip time) but is not used for ranking: ranking by it hurt (dev Hit@5 0.64 -> 0.41 at 0.2).
+  - **Vocabulary fix**: on real footage, a query's attribute words are only words that occur in real labels. Previously demo words ("jacket") became required attributes no real label has.
+  - **Re-ID** (`linkAcrossCameras`): cosine >= `REID_MIN` (0.88), both objects >= 40x40 in frame space, a shared colour word, a mutual best match, within 15 min. Cosine >= 0.8 alone gave 206 links, many wrong; the final rule gives 1 on the evaluation footage. Accuracy is unmeasured (no identity labels).
+  - **Alerts on real footage**: `indexer.configure({ onReady })` makes the server check active watches against each newly indexed recording's events. It matches against the recordings' own dataset even while the demo is shown, restoring the shown dataset before any await. The page toasts new alerts; check.mjs covers it.
+  - **Continuous live** (`sources.mjs`, stream cameras with `continuous`):
+    - One `ffmpeg -nostdin -f segment` per camera into `%TEMP%/vi-live-<feed>`; finished segments are queued every 15 s.
+    - A segment's start is its file mtime minus its duration: a live stream sends a burst of buffered video on connecting, so the strftime file name is wrong.
+    - Empty segments are skipped. While the backlog is full, segments are dropped and counted (`dropped while indexing caught up`).
+    - Without `-nostdin`, ffmpeg stopped after a segment or two.
+  - **Disk**: C: filled up during the evaluation (the MEVA footage plus scratch test installs) and truncated `sources.mjs` mid-write; it was restored from git and the session's changes re-applied. Test data now lives on `N:ideo-intel-test`.
 
 ## Footage sources (researched)
 

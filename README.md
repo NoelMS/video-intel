@@ -12,14 +12,28 @@ Built for problem statement **HNX26EPS05: Multi-Stream Video Intelligence with C
 
 | Capability | How |
 |---|---|
-| Natural-language search | Query is interpreted into entity, attributes, place, time window and intent, then narrowed stage by stage (retrieval → semantic → temporal → grounding → cross-camera → verification). Each stage streams to the UI. |
-| Grounded answers | Every answer cites camera + timestamp + frame, with the checks that passed or failed. If the evidence is not enough, it says so instead of guessing. |
+| Natural-language search | Query is interpreted into entity, attributes, place, time window ("in the last hour", "between 9 and 9:30") and intent, then narrowed stage by stage (retrieval → semantic → temporal → grounding → cross-camera → verification). Each stage streams to the UI. |
+| Open vocabulary | Every tracked object has a MobileCLIP image embedding as well as a short description, so words no label contains ("delivery box", "large bag") still find it. Each answer points at the moment the query best matches. |
+| Grounded answers | Every answer cites camera + timestamp + frame, with the checks that passed or failed, and a downloadable 10 s clip. If the evidence is not enough, it says so instead of guessing. |
 | Clarify once, then remember | An unknown place ("north gate") triggers one question: pick the camera and drag over the area. The place is saved on the server and reused in every later query, across restarts. |
-| Cross-camera journeys | Sightings of the same entity are chained into a route. Links are rated *likely same entity / likely continuation / possible continuation*, never stated as fact, and camera coverage gaps are always reported. |
-| Your own footage | Upload recordings; they are indexed on this computer by a local vision model (Ollama `qwen3-vl:2b` by default) and searched with the same pipeline. |
+| Cross-camera journeys | Sightings of the same entity are chained into a route when their crops look alike (MobileCLIP), share a colour and fit in time. Links are rated *likely same entity / likely continuation / possible continuation*, never stated as fact, and camera coverage gaps are always reported. |
+| Your own footage | Upload recordings (many at once with a `manifest.csv` of cameras and start times), capture public live cameras periodically or continuously, or import the MEVA archive. Indexed on this computer: YOLOX-S detection and tracking at 5 fps, each object named once by a local vision model (Ollama `qwen3-vl:2b`), MobileCLIP embeddings. |
 | Playback with detections | Play any indexed recording with its tracked objects boxed and labelled, or switch to the original picture. H.265 and other codecs browsers cannot play get an H.264 copy during indexing. |
-| Standing queries & alerts | "Notify me if anyone enters the rear entrance after 20:00" — evaluated against events as a recording is replayed. |
+| Standing queries & alerts | "Notify me if anyone enters the rear entrance after 20:00": checked against every recording as it finishes indexing (uploads, live captures, imports) and during replay. |
 | Privacy | Face and plate masking, retention and expiry limits, operator roles, and an audit trail for every reveal. |
+
+## Results
+
+On 43 queries with known answers over 13 cameras (27 from MEVA's official activity annotations, 16 hand-labelled),
+against a standard CLIP frame-retrieval baseline on the same footage:
+
+| | Hit@1 | Hit@5 | MRR | Median time error |
+|---|---|---|---|---|
+| Baseline: CLIP frame retrieval | 30.2% | 46.5% | 0.363 | 3.5 s |
+| This system | **41.9%** | **72.1%** | **0.528** | **0.3 s** |
+
+The gain is on activities (Hit@5 29.6% to 70.4%); on simple appearance queries the baseline is about as good. Method,
+ablation, held-out split, latency and limitations are in **[WRITEUP.md](WRITEUP.md)**; reproduce with `node eval/eval.mjs`.
 
 ## Screenshots
 
