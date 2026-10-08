@@ -183,6 +183,19 @@ if (ffmpegPath()) {
   assert.equal((await fetch(b2 + `videos/${hv.id}/file`)).headers.get('content-type'), 'video/x-matroska');
   const probed = await indexer.probe(indexer.playFile(hv));
   assert.equal(probed.codec, 'h264'); assert.equal(Math.round(probed.duration), 4);
+  // an unusable model reply skips that frame; a model that never answers in JSON fails the recording quickly
+  const bad = () => Object.assign(new Error('The vision model did not return JSON.'), { badReply: true });
+  const up2 = async name => { await fetch(b2 + 'videos?' + new URLSearchParams({ ...meta, name, filename: 'clip.mp4' }), { method: 'POST', headers: { 'content-type': 'video/mp4' }, body: readFileSync(clip) });
+    for (let i = 0; i < 150; i++) { const v = (await (await fetch(b2 + 'videos')).json()).find(x => x.name === name); if (['ready', 'failed'].includes(v.status)) return v; await new Promise(res => setTimeout(res, 200)); } };
+  let calls = 0;
+  indexer.configure({ describe: async () => { if (++calls <= 2) throw bad(); return { objects: [], faces: [], plates: [], lighting: 'good' }; } });
+  const flaky = await up2('Flaky');
+  assert.equal(flaky.status, 'ready', JSON.stringify(flaky)); assert.equal(flaky.skipped, 1, 'one frame failed twice and was skipped'); assert.equal(flaky.found, 0);
+  calls = 0;
+  indexer.configure({ describe: async () => { calls++; throw bad(); } });
+  const broken = await up2('Broken');
+  assert.equal(broken.status, 'failed'); assert.match(broken.error, /could not be analysed: The vision model did not return JSON/);
+  assert.ok(calls <= 10, 'gives up after at most 5 frames (2 tries each)');
   indexer.configure({ describe: null });
   srv.close();
 } else console.log('(ffmpeg not installed: skipped the video pipeline check)');

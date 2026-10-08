@@ -36,12 +36,18 @@ export async function hasModel(name) {
   } catch { return false; }
 }
 
-// Start Ollama's server if it is installed but not running (hidden, detached so it outlives us).
+// Start Ollama if it is installed but not running. Prefer its tray app, the way Ollama itself starts on Windows: the app
+// runs the server with the user's settings (e.g. a custom models folder) and keeps its runner processes windowless.
+// A detached `ollama serve` has no console, so Windows gave every runner it spawned a console of its own: ~18
+// windows flashed while one model loaded, and the custom models folder was lost ("model not found").
+// Fallback without the tray app: a non-detached serve shares this server's hidden console, so its runners stay hidden.
 export async function ensureOllama() {
   if (await ollamaVersion()) return true;
   const exe = ollamaExe();
   if (!exe) return false;
-  spawn(exe, ['serve'], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
+  const tray = join(dirname(exe), 'ollama app.exe');
+  if (existsSync(tray)) spawn(tray, ['--hide'], { detached: true, stdio: 'ignore' }).unref();
+  else spawn(exe, ['serve'], { stdio: 'ignore', windowsHide: true });
   for (let i = 0; i < 40; i++) { await new Promise(r => setTimeout(r, 500)); if (await ollamaVersion()) return true; }
   return false;
 }

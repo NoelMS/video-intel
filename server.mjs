@@ -112,6 +112,13 @@ function sendFile(req, res, file, type) {
 }
 const VIDEO_MIME = { '.mp4': 'video/mp4', '.m4v': 'video/mp4', '.mov': 'video/quicktime', '.webm': 'video/webm', '.mkv': 'video/x-matroska' };
 
+// Plain qwen3-vl:2b/4b are the reasoning variants; newer Ollama lets them reason through every reply instead of
+// answering in JSON. Move saved settings to the -instruct tag and show the setup prompt so it can be downloaded.
+async function migrateModel() {
+  const m = /^qwen3-vl:(\d+b)$/.exec((await api.getSettings()).vision.model);
+  if (m) await api.setSettings({ vision: { model: `qwen3-vl:${m[1]}-instruct`, setupSeen: false } });
+}
+
 // The active dataset follows settings.source: the demo, or "My footage" rebuilt whenever indexed videos change.
 let mine = null, mineKey = null;
 async function applySource() {
@@ -249,7 +256,7 @@ export function start(port = 0, storeFile = join(root, '.store', 'store.json'), 
   api.useStorage(fileStore(storeFile));
   indexer.useStorage(api.kv.load, api.kv.save);
   indexer.useStoreDir(dirname(storeFile));
-  applySource().then(indexer.resume);             // continue any indexing interrupted by a restart
+  migrateModel().then(applySource).then(indexer.resume);   // continue any indexing interrupted by a restart
   const server = createServer(async (req, res) => {
     const url = new URL(req.url, 'http://x');
     try {

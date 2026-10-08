@@ -79,10 +79,12 @@ class Launcher : Form {
   // ---------- the work (background thread) ----------
   void Work() {
     try {
-      if (Get(Health) != null) {
+      // Only restart something that is this app's server; any other program answering on 8000 is reported, never stopped.
+      string h = Get(Health);
+      if (h != null && h.Contains("\"mode\":\"server\"")) {
         Step("Restarting the updated server", "The code changed since it started.");
         StopListener();
-      } else if (ListenerPid() != 0) throw new Exception("Port 8000 is used by another program. Close it, then open Video Intelligence again.");
+      } else if (h != null || ListenerPid() != 0) throw new Exception("Port 8000 is used by another program. Close it, then open Video Intelligence again.");
       string node = FindNode() ?? InstallNode();
       RegisterProtocol();
       Step("Starting the local server", "");
@@ -106,7 +108,8 @@ class Launcher : Form {
 
   static string FindNode() {
     var list = new System.Collections.Generic.List<string>();
-    foreach (var dir in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(';')) if (dir.Trim() != "") list.Add(Path.Combine(dir.Trim(), "node.exe"));
+    // Absolute PATH entries only: a relative one (".") would pick up whatever node.exe sits in the current folder.
+    foreach (var dir in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(';')) if (Path.IsPathRooted(dir.Trim())) list.Add(Path.Combine(dir.Trim(), "node.exe"));
     list.Add(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "nodejs", "node.exe"));
     list.Add(Path.Combine(Rt, "node", "node.exe"));
     foreach (var p in list) {

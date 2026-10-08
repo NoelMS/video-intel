@@ -827,6 +827,8 @@ function videosList() {
         <div class="vstate"><span class="mono">${VSTATE[v.status]}${working && p.total ? ` · ${v.status !== 'analyzing' ? `${dur(p.done)} of ${dur(p.total)}` : `${p.done} / ${p.total} frames`}` : ''}</span>
           ${working ? `<span class="bar"><i style="width:${pct}%"></i></span>` : ''}</div>
         ${v.error ? `<p class="warn">${esc(v.error)}</p>` : ''}
+        ${v.status === 'ready' && v.skipped ? `<p class="dim">${v.skipped} frame${v.skipped === 1 ? '' : 's'} could not be analysed and ${v.skipped === 1 ? 'was' : 'were'} skipped.</p>` : ''}
+        ${v.status === 'ready' && v.found === 0 ? '<p class="dim">No people, vehicles, animals or bags were found. The index only looks for these, so screen recordings usually have none.</p>' : ''}
         <div class="acts">${v.status === 'ready' ? `<button class="txt" data-act="play-orig" data-id="${v.id}" data-t="0">Play with detections</button><button class="txt" data-act="play-orig" data-id="${v.id}" data-t="0" data-det="0">Play original</button>` : ''}
           ${['ready', 'failed'].includes(v.status) ? `<button class="txt" data-act="video-reindex" data-id="${v.id}">Re-index</button>` : ''}
           <button class="txt danger" data-act="video-del" data-id="${v.id}">Remove</button></div></div></li>`; }).join('')}</ol></section>`;

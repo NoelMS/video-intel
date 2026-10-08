@@ -119,17 +119,36 @@ async function index(v) {
   const dets = existsSync(detFile(v.id)) ? JSON.parse(readFileSync(detFile(v.id), 'utf8')) : [];
   const doneN = new Set(dets.map(d => d.n));
   put({ ...get(v.id), status: 'analyzing', model: opts.model, sampling: opts.sampling, progress: { done: dets.length, total: frames.length } });
+  let streak = 0;
   for (const f of frames) {
     if (current.cancelled) return;
     if (doneN.has(f.n)) continue;
-    dets.push({ ...f, ...await (opts.describe ?? describeFrame)(readFileSync(frameFile(v.id, f.n)).toString('base64')) });
+    const d = { ...f, ...await describeSafely(readFileSync(frameFile(v.id, f.n)).toString('base64')) };
+    dets.push(d);
+    streak = d.failed ? streak + 1 : 0;
+    // A model that never answers in JSON (e.g. a reasoning model) fails fast instead of grinding through every frame.
+    if (streak >= 5) { writeFileSync(detFile(v.id), JSON.stringify(dets)); throw new Error(`${streak} frames in a row could not be analysed: ${d.failed}`); }
     if (dets.length % 5 === 0 || dets.length === frames.length) {
       writeFileSync(detFile(v.id), JSON.stringify(dets));
       put({ ...get(v.id), progress: { done: dets.length, total: frames.length } });
     }
   }
   writeFileSync(detFile(v.id), JSON.stringify(dets));
-  put({ ...get(v.id), status: 'ready', indexedAt: new Date().toISOString(), progress: { done: frames.length, total: frames.length } });
+  const skipped = dets.filter(d => d.failed);
+  if (skipped.length > dets.length / 2) throw new Error(`${skipped.length} of ${dets.length} frames could not be analysed: ${skipped.at(-1).failed}`);
+  put({ ...get(v.id), status: 'ready', indexedAt: new Date().toISOString(), progress: { done: frames.length, total: frames.length },
+    skipped: skipped.length, found: dets.reduce((n, d) => n + d.objects.length, 0) });
+}
+
+// One unusable reply (empty, cut off, or reasoning instead of JSON) is retried once, then that frame is skipped rather
+// than failing the whole recording. Errors that retrying cannot fix (Ollama down, model missing) still stop indexing.
+async function describeSafely(b64) {
+  for (let attempt = 0; ; attempt++) {
+    try { return await (opts.describe ?? describeFrame)(b64); } catch (e) {
+      if (!e.badReply) throw e;
+      if (attempt) return { objects: [], faces: [], plates: [], lighting: 'good', failed: e.message };
+    }
+  }
 }
 
 // ---------- the vision model ----------
@@ -160,9 +179,10 @@ async function chat(images, prompt, format) {
   // Older Ollama put a thinking model's JSON in `thinking` with `content` empty, so look in both.
   const m = (await res.json()).message;
   for (const text of [m.content, m.thinking]) { const j = jsonIn(text); if (j) return j; }
-  throw new Error(m.thinking
+  // A reply that is all reasoning comes from the model itself (it ignores think: false), so it is never retried.
+  throw Object.assign(new Error(m.thinking
     ? `${opts.model} spent its whole reply reasoning. Pick an -instruct model (e.g. qwen3-vl:2b-instruct) in System → Local analysis.`
-    : 'The vision model did not return JSON. Try again, or pick another model in System → Local analysis.');
+    : 'The vision model did not return JSON. Try again, or pick another model in System → Local analysis.'), { badReply: !m.thinking });
 }
 export function jsonIn(text) {
   const t = String(text ?? '').replace(/<think>[\s\S]*?(<\/think>|$)/g, '').trim(), i = t.indexOf('{');

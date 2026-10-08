@@ -116,6 +116,19 @@ ES modules need an http origin. Opening `index.html` from disk will not work.
   - Setup dialog: sentence-case sans labels instead of mono caps (`.kicker`, `.pn`, `.tag`, `.pd`), SVG status marks, model choices as selectable cards (`:has(input:checked)`). `offline.html` label likewise; `sw.js` cache bumped to `vi-offline-v4`.
   - Scroll jump during installs: `pollSetup` called `openLayer`, which rebuilds and refocuses the top. It now swaps `dlg.innerHTML` and restores `dlg.scrollTop`. The first-launch auto-open also starts polling when a job is already running (it used to freeze). Verified with Playwright by mocking `/api/setup` (scrollTop 329 held across polls).
 
+- **PR #1 review + indexing fixes** (merged PR #1, then fixed what review and field reports found):
+  - **Binary check**: the committed `Video Intelligence.exe` was verified to be `launcher.cs` compiled. A fresh `csc` build of the source has the same size (22,528 bytes), the same icon and identical IL for all 66 methods, fields and resources (compared via reflection). After editing `launcher.cs`, rebuild with the command in its header and commit both.
+  - **Launcher safety**: it used to kill any `node` answering `/api/health` on 8000. Now it only restarts a reply containing `"mode":"server"`, and anything else on the port is reported, never stopped (verified with a stand-in Node app). Node lookup ignores relative PATH entries.
+  - **Console flashes while indexing**: when Ollama was not already running, `ensureOllama` started a detached `ollama serve`. With no console of its own, every runner it spawned (`llama-server`, GPU probes) got a console window: 18 flashes were measured while one model loaded. It also lost the tray app's custom models folder, giving "model not found". It now starts `ollama app.exe --hide` (Ollama's own way), falling back to a non-detached serve that shares the server's hidden console. Re-measured: 0 windows across a full re-index started with Ollama stopped.
+  - **"`<think>`… is not valid JSON" / "Unexpected end of JSON input"**: both were one bad model reply failing the whole recording.
+    - The PR's `jsonIn` strips `<think>` blocks.
+    - `describeSafely` retries an unusable reply once, then skips that frame (`failed` in detections).
+    - A recording fails only if most frames, or 5 in a row, fail.
+    - A reply that is pure reasoning is a property of the model, so it fails immediately with a pointer to an `-instruct` model.
+    - Videos record `skipped` and `found`, and the UI explains skipped frames and an empty result. A screen recording has no people, vehicles, animals or bags, so 0 objects is the correct result.
+  - **Thinking-model migration**: Ollama auto-updated to 0.40.1 mid-test (the tray app runs `OllamaSetup.exe` itself), after which plain `qwen3-vl:2b` reasoned through every reply. On start, `migrateModel()` moves saved `qwen3-vl:<n>b` to `-instruct` and clears `setupSeen`, so the prompt offers the download. A re-index with `qwen3-vl:2b-instruct` gave 366 detections and 0 skipped at ~13 s a frame on 0.40.1 (slower than the ~5 s measured on 0.31).
+  - **Verified PR features in headless Chrome**: the DivX clip plays from its H.264 copy with 12 interpolated boxes at 0:03 and at 0:36, "Original" shows none, every page transition lands, zero console errors. Boxes trail walking people because detections are 2 s apart.
+
 ## Footage sources (researched)
 
 Live feeds (for the live-ingest stretch goal; all free, check each licence before redistributing):
