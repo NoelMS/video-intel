@@ -79,7 +79,7 @@ function header() {
     <button class="mark" data-act="go" data-view="search">Multi-Stream <b>Video Intelligence</b></button>
     <nav aria-label="Primary">${nav.map(([v, l]) => `<button data-act="go" data-view="${v}" ${S.view === v ? 'aria-current="page"' : ''}>${l}</button>`).join('')}</nav>
     <div class="sys">
-      <span class="mode" role="group" aria-label="Footage"><button aria-pressed="${!!ds().DEMO}" data-act="source" data-src="demo" title="Synthetic demo footage">Demo</button><button aria-pressed="${!ds().DEMO}" data-act="source" data-src="mine" ${mode === 'server' ? 'title="Your indexed recordings"' : 'disabled title="Needs the local server: run Start.cmd"'}>My footage</button></span>
+      <span class="mode" role="group" aria-label="Footage"><button aria-pressed="${!!ds().DEMO}" data-act="source" data-src="demo" title="Synthetic demo footage">Demo</button><button aria-pressed="${!ds().DEMO}" data-act="source" data-src="mine" ${mode === 'server' ? 'title="Your indexed recordings"' : 'disabled title="Needs the local server: open Video Intelligence.exe"'}>My footage</button></span>
       <button class="icon-btn" data-act="go" data-view="system" aria-label="Privacy masking ${pv().faces || pv().plates ? 'on' : 'off'}" title="Privacy masking ${pv().faces || pv().plates ? 'on' : 'off'}">${ICON[pv().faces || pv().plates ? 'shield' : 'shieldOff']}</button>
       <button class="icon-btn" data-act="theme" aria-label="Theme: ${theme()}" title="Theme: ${theme()}">${ICON[theme()]}</button>
       <button class="keys" data-act="palette" aria-label="Open command menu (Ctrl K)" title="Command menu"><kbd>Ctrl</kbd><kbd>K</kbd></button>
@@ -675,22 +675,24 @@ const setupReady = s => s.ffmpeg.ok && s.ollama.running && s.model.ok;
 function setupLayer() {
   const s = S.setup, j = s.job, running = j && !j.finished, model = S.setupModel ?? s.model.name;
   const known = Object.keys(s.models).includes(model);
-  const row = (key, name, note, ok, okText) => `<li class="${ok ? 'ok' : ''}"><span class="st" aria-hidden="true">${ok ? '✓' : '○'}</span>
-    <div><p><b>${name}</b> <span class="mono dim">${ok ? okText : 'not installed'}</span></p><p class="dim">${note}</p></div></li>`;
-  return `<header class="ev-top"><p class="eyebrow">LOCAL ANALYSIS</p><button class="txt" data-act="close">Close · Esc</button></header>
+  const mark = ok => `<span class="st" aria-hidden="true">${ok ? '<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="7"/><path d="m5 8.2 2 2 4-4.4"/></svg>' : '<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="7"/></svg>'}</span>`;
+  const row = (name, note, ok, okText) => `<li class="${ok ? 'ok' : ''}">${mark(ok)}
+    <div><p class="pn">${name} <span class="tag">${ok ? okText : 'Not installed'}</span></p><p class="pd">${note}</p></div></li>`;
+  const modelOk = s.model.ok && s.model.name === model;
+  return `<header class="ev-top"><p class="kicker">Local analysis</p><button class="txt" data-act="close">Close · Esc</button></header>
     <div class="setup">
-      <h2 class="claim">Search your own recordings, privately.</h2>
+      <h2 class="setup-title">Search your own recordings, privately.</h2>
       <p class="lede">Your footage is analysed on this computer by a local vision model. Nothing is uploaded. Downloads are checked against their published checksums, and nothing needs admin rights.</p>
       <ol class="parts">
-        ${row('ffmpeg', ...SETUP_PARTS[0].slice(1), s.ffmpeg.ok, 'installed')}
-        ${row('ollama', ...SETUP_PARTS[1].slice(1), s.ollama.installed, `installed${s.ollama.version ? ' · v' + s.ollama.version : ''}${s.ollama.running ? '' : ' · not running'}`)}
-        <li class="${s.model.ok && s.model.name === model ? 'ok' : ''}"><span class="st" aria-hidden="true">${s.model.ok && s.model.name === model ? '✓' : '○'}</span><div>
-          <p><b>Vision model</b> <span class="mono dim">${s.model.ok && s.model.name === model ? model + ' · downloaded' : 'choose one'}</span></p>
+        ${row(...SETUP_PARTS[0].slice(1), s.ffmpeg.ok, 'Installed')}
+        ${row(...SETUP_PARTS[1].slice(1), s.ollama.installed, `Installed${s.ollama.version ? ' · version ' + s.ollama.version : ''}${s.ollama.running ? '' : ' · not running'}`)}
+        <li class="${modelOk ? 'ok' : ''}">${mark(modelOk)}<div>
+          <p class="pn">Vision model <span class="tag">${modelOk ? model + ' · downloaded' : 'Choose one'}</span></p>
           <fieldset class="models" ${running ? 'disabled' : ''}><legend class="sr-only">Vision model</legend>
             ${Object.entries(s.models).map(([k, m], i) => `<label class="opt"><input type="radio" name="vmodel" value="${k}" ${model === k ? 'checked' : ''}>
-              <span><b>${k}</b> <span class="mono dim">${m.size}</span>${i === 0 ? ' <span class="rec">Recommended</span>' : ''}<br><span class="dim">${m.note}</span></span></label>`).join('')}
+              <span><span class="on">${k}<span class="size">${m.size}</span>${i === 0 ? '<span class="rec">Recommended</span>' : ''}</span><span class="pd">${m.note}</span></span></label>`).join('')}
             <label class="opt"><input type="radio" name="vmodel" value="custom" ${known ? '' : 'checked'}>
-              <span><b>Another Ollama model</b><br><span class="dim">For example one you have trained or imported yourself. It must accept images.</span>
+              <span><span class="on">Another Ollama model</span><span class="pd">For example one you have trained or imported yourself. It must accept images.</span>
               <input class="custom-model" name="custom" value="${known ? '' : esc(model)}" placeholder="name:tag" pattern="[\\w.\\-]+(/[\\w.\\-]+)*(:[\\w.\\-]+)?"></span></label>
           </fieldset></div></li>
       </ol>
@@ -721,7 +723,7 @@ function pollSetup() {
   clearTimeout(setupPoll);
   const tick = async () => {
     S.setup = await api.getSetup();
-    if (S.layer?.kind === 'setup') openLayer({ kind: 'setup' });
+    if (S.layer?.kind === 'setup' && dlg.open) { const y = dlg.scrollTop; dlg.innerHTML = setupLayer(); dlg.scrollTop = y; }   // not openLayer: it refocuses the top
     if (S.setup.job && !S.setup.job.finished) setupPoll = setTimeout(tick, 700);
     else if (S.setup.job && !S.setup.job.error) toast('Local analysis is ready');
   };
@@ -1061,7 +1063,7 @@ function systemView() {
         <p class="dim">Viewers cannot export. Only supervisors can reveal masked regions, and every reveal is logged.</p></fieldset>
       <div class="acts"><button class="btn primary">Save settings</button>${S.res ? '<button type="button" class="txt" data-act="diag">Last search diagnostics</button>' : ''}</div>
     </form>
-    ${mode === 'server' ? `<section class="local"><p class="eyebrow">LOCAL ANALYSIS</p><p class="dim">Vision model <b class="mono">${esc(S.settings.vision.model)}</b> via Ollama, with ffmpeg for decoding.</p>
+    ${mode === 'server' ? `<section class="local"><p class="kicker">Local analysis</p><p class="dim">Vision model <b class="mono">${esc(S.settings.vision.model)}</b> via Ollama, with ffmpeg for decoding.</p>
       <div class="acts"><button class="btn" data-act="setup">Check or install components</button></div></section>` : ''}
     <section class="audit"><p class="eyebrow">AUDIT TRAIL</p>${S.audit.some(a => ev(a.eventId)) ? `<ol>${S.audit.filter(a => ev(a.eventId)).map(a => `<li class="mono"><span>${new Date(a.at).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'medium' })}</span><span>${a.action.toUpperCase()}</span><span>${a.role}</span><button class="txt" data-act="open" data-id="${a.eventId}">${cam(ev(a.eventId).cameraId).code} · ${ev(a.eventId).time}</button></li>`).join('')}</ol>` : '<p class="dim">No protected regions have been revealed.</p>'}</section>
   </section>`;
@@ -1400,13 +1402,19 @@ function render() {
   scrollTo(0, y);
 }
 
-await loadDataset();
-[S.memory, S.history, S.saved, S.notes, S.settings, S.audit, S.watches, S.alerts] = await Promise.all([
-  api.getMemory(), api.getHistory(), api.getSaved(), api.getNotes(), api.getSettings(), api.getAudit(), api.getWatches(), api.getAlerts()]);
-if (mode === 'server') { S.videos = await api.getVideos(); if (S.videos.some(v => v.status !== 'ready' && v.status !== 'failed')) pollVideos(); }
+try {
+  await loadDataset();
+  [S.memory, S.history, S.saved, S.notes, S.settings, S.audit, S.watches, S.alerts] = await Promise.all([
+    api.getMemory(), api.getHistory(), api.getSaved(), api.getNotes(), api.getSettings(), api.getAudit(), api.getWatches(), api.getAlerts()]);
+  if (mode === 'server') { S.videos = await api.getVideos(); if (S.videos.some(v => v.status !== 'ready' && v.status !== 'failed')) pollVideos(); }
+} catch (e) {
+  $('#app').innerHTML = `<main class="boot-fail"><p class="eyebrow">Could not start</p><h1 class="claim">The local server did not answer as expected.</h1>
+    <p class="dim">${esc(e.message)}</p><p>Close this window and open <b>Video Intelligence.exe</b> again; it restarts an outdated server.</p></main>`;
+  throw e;
+}
 render();
 // First launch: offer to set up local analysis (server mode only; the browser-only mock cannot run models).
-if (mode === 'server' && !S.settings.vision.setupSeen) api.getSetup().then(s => { if (!setupReady(s)) { S.setup = s; openLayer({ kind: 'setup' }); } }).catch(() => {});
+if (mode === 'server' && !S.settings.vision.setupSeen) api.getSetup().then(s => { if (!setupReady(s)) { S.setup = s; openLayer({ kind: 'setup' }); if (s.job && !s.job.finished) pollSetup(); } }).catch(() => {});
 
 
 // Installable app (PWA); the worker only serves offline.html when the local server is down.
