@@ -63,6 +63,8 @@ ES modules need an http origin. Opening `index.html` from disk will not work.
 
 - **Evidence board (§63) + comparison (§55)**: saved items are `{id, kind: event|journey, eventId|track, lane, query, savedAt}`; array order is board order. `norm()` upgrades pre-board records. Lanes are `api.LANES`. `moveItem(id, lane, index)` is the only reorder primitive (`PUT /api/saved/:id`; ids such as `journey:A17` are URL-encoded). Drag-and-drop uses native HTML5; the keyboard path is each card's lane select plus ↑/↓. "Pin journey to board" appears on journey results and passports. Tick Compare on frames, then use "Compare selected". Export groups items by lane and includes journeys.
 
+- **Opening sequence (§76)**: `introLayer`/`playIntro` is a scripted ~6 s demonstration labelled "DEMONSTRATION · scripted sequence on demo footage, not a live search". Steps are driven by `data-step` 0–5 with CSS transitions (query types, timeline brackets CAM 04, car grounds, CAM 06 links in, answer). It auto-plays once (`localStorage['vi.intro']`), replays from the landing link or palette, closes with Esc, and shows the final state only under reduced motion. "Run this search for real" runs the actual query. Test drivers should set `vi.intro=seen` before loading.
+
 ## Next up
 
 Opening sequence.

@@ -104,7 +104,7 @@ function searchView() {
     <div class="hero-l">
       <p class="eyebrow">${DAY} · 09:00 → 10:00 ${TZ} · ${cams.length} cameras · recorded</p>
       <h1>Search every camera like you remember the moment.</h1>
-      <p class="lede">Ask naturally. Find the moment. Follow the evidence.</p>
+      <p class="lede">Ask naturally. Find the moment. Follow the evidence. <button class="txt" data-act="intro">Watch the 6-second demonstration</button></p>
       ${composer(false)}
       <ol class="starts" aria-label="Starting points">${STARTS.map(([q, t], i) => `<li><button data-act="ask" data-q="${esc(q)}">
         <span class="mono dim">${String(i + 1).padStart(2, '0')}</span><span>${esc(q)}</span><span class="mono dim">${t}</span></button></li>`).join('')}</ol>
@@ -531,9 +531,12 @@ function openLayer(L) {
   if (L.kind === 'palette') { palFilter(); $('#pal-q').focus(); }
   else dlg.querySelector('h2, [data-act=close]')?.focus?.();
 }
-dlg.addEventListener('close', () => { stopPlay(); S.layer = null; S.reveal = false; dlg.innerHTML = ''; });
+dlg.addEventListener('close', () => {
+  stopPlay(); introTimers.forEach(clearTimeout); introTimers = [];
+  S.layer = null; S.reveal = false; dlg.innerHTML = '';
+});
 
-const LAYERS = { register: () => registerLayer(), video: L => videoLayer(L), diag: () => diagLayer(), evidence: evidenceLayer, compare: compareLayer, passport: passportLayer, resolver: () => resolver(S.resolver), palette: () => paletteLayer() };
+const LAYERS = { intro: () => introLayer(), register: () => registerLayer(), video: L => videoLayer(L), diag: () => diagLayer(), evidence: evidenceLayer, compare: compareLayer, passport: passportLayer, resolver: () => resolver(S.resolver), palette: () => paletteLayer() };
 
 function evidenceLayer({ id, off = 0, focus = false }) {
   const e = ev(id), c = cam(e.cameraId), q = S.res?.interp;
@@ -629,6 +632,38 @@ function passportLayer({ track }) {
     <ol class="pp">${s.map(e => `<li><button data-act="open" data-id="${e.id}" aria-label="Open ${cam(e.cameraId).code} ${e.time}">${still(e, { crop: true })}</button><span class="mono">${cam(e.cameraId).code} · ${e.time}</span></li>`).join('')}</ol>
     ${maskable({ entity: o.entity }) && !S.reveal ? `<p class="mono dim">${o.entity === 'person' ? 'Faces' : 'Plates'} masked by privacy setting.</p>` : ''}
     <div class="acts"><button class="btn" data-act="follow" data-track="${track}">Open journey</button><button class="txt" data-act="pin-journey" data-track="${track}">Pin journey to board</button></div>`;
+}
+
+// ---------- opening sequence (§76). Scripted demonstration, labelled as such; skippable; static under reduced motion. ----------
+let introTimers = [];
+function introLayer() {
+  const e = ev('ev_091412'), e2 = ev('ev_091548'), p = t => (sec(t) - W[0]) / (W[1] - W[0]) * 100;
+  return `<div class="intro" data-step="0">
+    <div class="intro-top"><p class="eyebrow">DEMONSTRATION · scripted sequence on demo footage, not a live search</p><button class="txt" data-act="close">Skip · Esc</button></div>
+    <div class="intro-stage">
+      <figure class="intro-a">${frame('cam_04', { time: '09:14:04' })}<div class="intro-hit">${still(e, { trail: true })}</div></figure>
+      <svg class="intro-link" viewBox="0 0 100 4" preserveAspectRatio="none" aria-hidden="true"><line x1="0" y1="2" x2="100" y2="2"/></svg>
+      <figure class="intro-b">${still(e2)}</figure>
+    </div>
+    <p class="intro-q" id="intro-q" aria-live="polite"></p>
+    <div class="intro-tl" aria-hidden="true">${cams.map(c => `<div class="${c.id === 'cam_04' ? 'keep' : ''}"><span class="mono">${c.code}</span><i>${allEvents.filter(x => x.cameraId === c.id)
+      .map(x => `<b class="${x.id === e.id ? 'hit' : ''}" style="left:${p(x.time)}%"></b>`).join('')}</i></div>`).join('')}
+      <span class="bracket" style="--l:${(p(e.time) - 3).toFixed(2)}"></span></div>
+    <div class="intro-answer"><p class="verdict">SUPPORTED</p>
+      <p class="claim">A red sedan entered through the Main Gate at 09:14:12 and was next seen at Parking at 09:15:48.</p>
+      <div class="acts"><button class="btn primary" data-act="intro-try">Run this search for real</button><button class="txt" data-act="close">Go to the product</button></div></div>
+  </div>`;
+}
+function playIntro() {
+  try { localStorage.setItem('vi.intro', 'seen'); } catch {}
+  openLayer({ kind: 'intro' });
+  const root = $('.intro'), q = 'Find the red car entering the gate.', show = s => { $('#intro-q') && ($('#intro-q').textContent = s); };
+  const at = (ms, fn) => introTimers.push(setTimeout(fn, ms));
+  if (reduced.matches) { root.dataset.step = 5; return show(`“${q}”`); }
+  at(500, () => root.dataset.step = 1);
+  [...q].forEach((_, i) => at(700 + i * 30, () => show(`“${q.slice(0, i + 1)}`)));
+  at(720 + q.length * 30, () => show(`“${q}”`));
+  for (const [ms, step] of [[2100, 2], [2900, 3], [4000, 4], [5100, 5]]) at(ms, () => root.dataset.step = step);
 }
 
 // ---------- import + registration (§116-118) ----------
@@ -948,6 +983,7 @@ const commands = () => [
   ...(S.context ? [[`Open journey · ${tracks[S.context.track]}`, () => follow(S.context.track)]] : []),
   ['Define a visual referent', () => openResolver({})],
   ['Open live (simulated replay)', () => go('live')],
+  ['Play the opening demonstration', () => playIntro()],
   [`Turn privacy masking ${S.settings.privacy.faces || S.settings.privacy.plates ? 'off' : 'on'}`, togglePrivacy],
   ['Export investigation', () => exportPackage()],
   ...cams.filter(c => c.status !== 'offline').map(c => [`Search ${c.code} · ${c.name}`, () => { S.scope = c.id; go('search'); focusQ(); }]),
@@ -1053,6 +1089,8 @@ function cycleTheme() {
 
 const ACT = {
   theme: cycleTheme,
+  intro: () => playIntro(),
+  'intro-try': () => { dlg.close(); run('Did a red car pass through the main gate?'); },
   'pin-journey': async d => { await api.saveJourney(d.track, S.query); S.saved = await api.getSaved(); toast('Journey pinned to the evidence board'); },
   nudge: d => { const x = S.saved.find(i => i.id === d.id), lane = S.saved.filter(i => i.lane === x.lane); moveCard(d.id, x.lane, lane.indexOf(x) + +d.d); },
   'compare-picked': () => openLayer({ kind: 'compare', ids: [...picked] }),
@@ -1235,3 +1273,4 @@ function render() {
   api.getMemory(), api.getHistory(), api.getSaved(), api.getNotes(), api.getSettings(), api.getAudit(), api.getWatches(), api.getAlerts()]);
 S.registered = await api.getRegistered();
 render();
+if (S.view === 'search' && S.phase === 'idle') { let seen = 'seen'; try { seen = localStorage.getItem('vi.intro'); } catch {} if (!seen) playIntro(); }
