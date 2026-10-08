@@ -34,10 +34,10 @@ ES modules need an http origin. Opening `index.html` from disk will not work.
 | `api.js` | Search pipeline and endpoint shapes (§90). Works over the active dataset (`useDataset`/`ds()`, `W` mutated in place). Pure logic plus pluggable storage (`kv` shared with the indexer). `search({ verify })` runs the visual check when the server passes one |
 | `frame.js` | Camera stills as SVG: synthetic scenes for the demo, or the extracted frame for your footage (`realFrame`: nearest frame, the track's box on that exact frame, opaque redaction for faces and plates the model reported). Boxes live in 640x360 space; non-16:9 cameras are scaled vertically by `ky` so they keep their true shape |
 | `setup.mjs` | Local-analysis dependencies: status (ffmpeg, Ollama, model) and a one-at-a-time install job. ffmpeg comes from the gyan.dev essentials zip (SHA-256 verified, unpacked with `System32\tar.exe`; a bare `tar` can be Git's GNU tar, which fails on zip). Ollama comes from the GitHub release `OllamaSetup.exe` (verified against `sha256sum.txt`, `/VERYSILENT` per-user install). The model is fetched with `/api/pull` (streamed progress) |
-| `indexer.mjs` | Your recordings: streams an upload to `.store/videos`, ffprobe metadata, a resumable queue. ffmpeg samples at `pipeline.sampling` fps with `mpdecimate` (drops static frames) and `showinfo` timestamps. `describeFrame` calls Ollama with a JSON schema. `track()` links detections (overlap or ~1.5 body-lengths, plus agreeing labels). `dataset()` builds the "mine" dataset in `data.js` shape. `linkAcrossCameras` gives "possible" re-identification by shared description words. `verify()` re-checks a candidate frame with the question |
+| `indexer.mjs` | Your recordings: streams an upload to `.store/videos`, ffprobe metadata, a resumable queue. ffmpeg samples at `pipeline.sampling` fps with `mpdecimate` (drops static frames) and `showinfo` timestamps. `describeFrame` calls Ollama with a JSON schema. `track()` links detections (overlap or ~1.5 body-lengths, plus agreeing labels). `dataset()` builds the "mine" dataset in `data.js` shape. `linkAcrossCameras` gives "possible" re-identification by shared description words. `verify()` re-checks a candidate frame with the question. Sources the browser cannot play (codec not h264/vp8/vp9/av1, or container not mp4/m4v/webm/mov) first get an H.264 copy at `playFile(v)` (`<id>.play.mp4`, status `transcoding`) |
 | `service.js` | Backend selection: `{ api, mode }`. Pure helpers always from `api.js`, endpoints from `remote.js` when the server answers |
 | `remote.js` | fetch/EventSource client for `server.mjs`, same signatures as `api.js` endpoints |
-| `server.mjs` | Node (no deps): static files, `/api/*` REST, `POST /api/search` + `GET /api/search/:id/events` SSE, `DELETE /api/search/:id` cancels. Validates every write (trust boundary) |
+| `server.mjs` | Node (no deps): static files, `/api/*` REST, `POST /api/search` + `GET /api/search/:id/events` SSE, `DELETE /api/search/:id` cancels. Validates every write (trust boundary). `GET /api/videos/:id/play` = browser-playable copy (or the source), `/file` = untouched original |
 | `launcher.cs` | Windowless launcher, compiled on the user's machine by `start.ps1` with the csc.exe that ships with Windows (`/target:winexe`, so no console). It starts `server.mjs` with `CreateNoWindow`, `PORT=8000`, `VI_IDLE_EXIT`, and `VI_LOG=.runtime\server.log`, waits for health, then exits. Node's path comes from `.runtime\node-path.txt` |
 | `Start.cmd` / `start.ps1` | One-click launcher (Windows). Finds Node 18+ (PATH, Program Files, `.runtime`). If missing: `winget install OpenJS.NodeJS.LTS`, else a portable LTS zip into `.runtime\` verified against nodejs.org `SHASUMS256.txt` (no admin). Re-click while running just reopens the browser. `-Portable` forces the private runtime; `-NoBrowser` skips opening it. Closing the window stops the server |
 | `manifest.webmanifest`, `icon.svg`, `icon-192.png`, `icon-512.png` | PWA install metadata. PNGs are rendered from `icon.svg` with headless Chrome (`--screenshot --default-background-color=00000000`) |
@@ -100,15 +100,39 @@ ES modules need an http origin. Opening `index.html` from disk will not work.
   - Saved items, audit rows, alerts and referents are filtered to the active dataset (`here()`, `memHere()`).
   - The demo opening plays only from its button.
 
+- **Playback with detections, H.265, transitions, scrollbar**:
+  - `videoLayer` plays `/api/videos/:id/play` with `#vbox` (HTML divs, percentages of the 640x360 box space, so labels never stretch) over the video; `boxAt` interpolates each track's `dets` and holds half a sampling interval at the ends. `V` holds the layer state; one `requestAnimationFrame` loop (`V.raf`) runs while the dialog is open. "With detections / Original" is `data-act=vmode`. Entry points: evidence view and the recordings list (`play-orig`, `data-det="0"` for original).
+  - Verified with Playwright on two real TfL JamCam clips, one converted to H.265 (`libx265` in mkv): both play, boxes draw, Original draws none, zero console errors.
+  - `go(view, after)` wraps page swaps in `document.startViewTransition` (skipped for reduced motion, open dialogs and same-page). The `vt-nav` class scopes the root slide/fade so the evidence morph keeps its own animation; `--vt-dir` is ±1 from nav order (`ORDER`). The header has its own transition name so it does not move. The swap is async, so focus/scroll work goes in `after`.
+  - Scrollbars: `::-webkit-scrollbar` pill thumb (transparent border + `background-clip`); the standard `scrollbar-color` is inside `@supports not selector(::-webkit-scrollbar)` because Chromium ignores the pseudo-elements once it is set.
+  - Fixed: Live page crashed in My footage mode when a watch was scoped to a demo camera (`cam(w.scope)` undefined).
+
+## Footage sources (researched)
+
+Live feeds (for the live-ingest stretch goal; all free, check each licence before redistributing):
+- **TfL JamCams** (London, ~890 cameras): `https://api.tfl.gov.uk/Place/Type/JamCam`. No key needed. Each camera has an `imageUrl` (JPEG) and a `videoUrl` (~10 s H.264 MP4, refreshed every few minutes). Verified working; good for quick real test clips.
+- **Caltrans CCTV** (California): per-district JSON/CSV/XML at `https://cwwp2.dot.ca.gov/data/d{1..12}/cctv/cctvStatusD{01..12}.json`; cameras with `cctv.imageData.streamingVideoURL` are true live HLS (196 in District 4). Verified: `ffmpeg -i <playlist.m3u8> -t 4 -c copy out.mp4` records live H.264 (352x240). About half the listed streams return 404 at any moment even when `inService` is true, so probe before use. This is the most direct path to live ingest: record segments with ffmpeg and feed them to the existing indexer queue.
+- **Maryland CHART**: ArcGIS feature service `mdgeodata.md.gov/.../MD_TrafficCameras/FeatureServer` with live-feed URLs.
+- **Korea ITS**: `openapi.its.go.kr` `NCCTVInfo` returns live/MP4 CCTV URLs (needs a free key).
+
+Recorded multi-camera datasets (for evaluation and the baseline comparison):
+- **MEVA** (Kitware/IARPA): ~330 h, 29 cameras, overlapping and non-overlapping, persons and vehicles, activity annotations. `aws s3 ls --no-sign-request s3://mevadata-public-01/`. Best fit for this problem.
+- **CamNeT**: 5-8 non-overlapping cameras on a campus, ground-truth trajectories; good for cross-camera re-ID.
+- **WILDTRACK** (EPFL): 7 overlapping HD cameras, pedestrians, calibrated and synchronised.
+- **AI City Challenge**: multi-camera vehicle and people tracking (registration required).
+
 ## Verifying changes
 
-`npm run check` covers the logic and the server. For UI work, drive headless Chrome over CDP (no Playwright installed). The pattern used so far: launch `chrome --headless=new --remote-debugging-port`, set `localStorage vi.intro=seen`, run JS steps, capture screenshots, and collect `Runtime.exceptionThrown`, console errors and `Log.entryAdded`.
+`npm run check` covers the logic and the server (the H.265 and full-pipeline parts need ffmpeg: `node -e "import('./setup.mjs').then(s=>s.install({ffmpeg:true}))"`).
+
+For UI work use Playwright **outside the repo** so the project stays dependency-free: `npm i playwright` in a temp folder and `chromium.launch({ channel: 'msedge' })` (no browser download). Import `server.mjs`'s `start(port, storeFile)` and `indexer.configure({ describe })` in the same process to index real clips without Ollama; a stand-in `describe` must return boxes already in 640x360 `[x, y, w, h]` (what `describeFrame` produces), not the model's 0-1000 corners. Collect `pageerror` stacks and console errors. Playwright hides scrollbars; pass `ignoreDefaultArgs: ['--hide-scrollbars']` to see them. For mid-transition shots, screenshot ~120 ms after a nav click.
 
 ## Known limits (deliberate; do not paper over)
 
 - The demo dataset is synthetic. On your footage, detections come from a small local model: labels are descriptive but not exhaustive, faces and plates are only masked when the model reports them (often not, for distant CCTV figures), and confidence is track persistence, not a calibrated score.
 - Tracking samples one frame every 2 s by default, so a person can split into several tracks. Cross-camera links are by description only and always "possible".
-- Browsers cannot play many CCTV codecs (DivX, H.265). The evidence view uses extracted frames, and "Play original" explains when it cannot play.
+- Playback boxes are interpolated between sampled frames (every 2 s by default), so they lag fast motion. Privacy masks are not applied to playback, only to extracted frames.
+- Recordings indexed before the H.265 change have no playable copy; Re-index makes one.
 - Event times are seconds from the first recording's local midnight. Footage spanning several days shows hours past 24.
 - Live mode is a replay of indexed footage, not ingest.
 - No authentication: the operator role is a setting. A real deployment must bind roles to identities server-side (`addAudit` already enforces the role from settings).
