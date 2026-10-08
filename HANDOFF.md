@@ -33,7 +33,8 @@ ES modules need an http origin. Opening `index.html` from disk will not work.
 | `data.js` | Demo dataset: cameras, events, seed referents, track names |
 | `api.js` | Search pipeline and endpoint shapes (§90). Works over the active dataset (`useDataset`/`ds()`, `W` mutated in place). Pure logic plus pluggable storage (`kv` shared with the indexer). `search({ verify })` runs the visual check when the server passes one |
 | `frame.js` | Camera stills as SVG: synthetic scenes for the demo, or the extracted frame for your footage (`realFrame`: nearest frame, the track's box on that exact frame, opaque redaction for faces and plates the model reported). Boxes live in 640x360 space; non-16:9 cameras are scaled vertically by `ky` so they keep their true shape |
-| `setup.mjs` | Local-analysis dependencies: status (ffmpeg, Ollama, model) and a one-at-a-time install job. ffmpeg comes from the gyan.dev essentials zip (SHA-256 verified, unpacked with `System32\tar.exe`; a bare `tar` can be Git's GNU tar, which fails on zip). Ollama comes from the GitHub release `OllamaSetup.exe` (verified against `sha256sum.txt`, `/VERYSILENT` per-user install). The model is fetched with `/api/pull` (streamed progress) |
+| `setup.mjs` | Local-analysis dependencies: status (ffmpeg, Ollama, model) and a one-at-a-time install job. ffmpeg comes from the gyan.dev essentials zip (SHA-256 verified, unpacked with `System32\tar.exe`; a bare `tar` can be Git's GNU tar, which fails on zip). Ollama comes from the GitHub release `OllamaSetup.exe` (verified against `sha256sum.txt`, `/VERYSILENT` per-user install). The model is fetched with `/api/pull` (streamed progress). The detector: `onnxruntime-node` and `onnxruntime-common` 1.30.0 tarballs from the npm registry and `yolox_s.onnx` from the YOLOX 0.1.1rc0 GitHub release, all pinned by SHA-256, unpacked with `tar.exe` into `.runtime/detector-tmp` and renamed into place; other platforms' runtimes are deleted (100 MB on disk). `migrateModel()` in server.mjs offers it once to installs that predate it (`vision.detectorOffered`) |
+| `detector.mjs` | Object detector: YOLOX-S (Apache-2.0, COCO) on ONNX Runtime from `.runtime/detector`, DirectML on Windows, else CPU. `frames()` reads a JPEG sequence through one ffmpeg as 640x640 letterboxed BGR (YOLOX's own preprocessing; padding grey 114, top-left). `detect()` decodes the raw head output (grid offsets, `exp` sizes, sigmoided objectness x class), keeps person/vehicle/animal/bag classes, runs NMS per class (plus 0.7 across classes of one kind, so a taxi is not both car and truck), and maps boxes to the 640x360 app space. `lighting()` is mean brightness. ~70-105 ms a frame on an RTX 3050 including decode |
 | `indexer.mjs` | Your recordings: streams an upload to `.store/videos`, ffprobe metadata, a resumable queue. ffmpeg samples at `pipeline.sampling` fps with `mpdecimate` (drops static frames) and `showinfo` timestamps. `describeFrame` calls Ollama with a JSON schema. `track()` links detections (overlap or ~1.5 body-lengths, plus agreeing labels). `dataset()` builds the "mine" dataset in `data.js` shape. `linkAcrossCameras` gives "possible" re-identification by shared description words. `verify()` re-checks a candidate frame with the question. Sources the browser cannot play (codec not h264/vp8/vp9/av1, or container not mp4/m4v/webm/mov) first get an H.264 copy at `playFile(v)` (`<id>.play.mp4`, status `transcoding`) |
 | `service.js` | Backend selection: `{ api, mode }`. Pure helpers always from `api.js`, endpoints from `remote.js` when the server answers |
 | `remote.js` | fetch/EventSource client for `server.mjs`, same signatures as `api.js` endpoints |
@@ -179,6 +180,45 @@ ES modules need an http origin. Opening `index.html` from disk will not work.
     - Licence: Ultralytics weights are AGPL-3.0, so prefer an Apache-2.0 model (YOLOX, RT-DETR, D-FINE, RF-DETR).
     - Training: fine-tuning a vision model for Ollama needs a CUDA PyTorch and more than 4 GB of VRAM. The local PyTorch is CPU-only. A detector pre-trained on COCO already covers people, vehicles and bags, so training only matters later. It would mean fine-tuning the detector on CCTV frames, using the vision model's labels.
 
+- **CPU split and fallback, tested** (scratch scripts, not committed). Forcing layers onto the CPU with `num_gpu`:
+
+  | Layers on the GPU | Writing | Reading the image | Per frame |
+  |---|---|---|---|
+  | 0 (all CPU) | 26 tokens/s | 20 s | ~69 s |
+  | 10 | 29 tokens/s | 16 s | ~76 s |
+  | 20 | 54 tokens/s | 16 s | ~56 s |
+  | Ollama default (80% GPU) | 77 tokens/s | 1 s | ~12.5 s |
+  | 99 (all) | 103 tokens/s | 0.9 s | ~7-8 s |
+
+  The out-of-memory fallback was checked with a proxy that fakes Ollama's "cudaMalloc failed: out of memory" for `num_gpu: 99`. The first call retried without it and succeeded, and later calls left the split to Ollama.
+- **Object detector (option B)** (`detector.mjs`, `indexWithDetector`):
+  - **Install**: part of the same first-launch setup the launcher opens. The fourth row is "Object detector", and `setupReady` includes it. Indexing without it still works (the vision model alone, as before).
+  - **Pipeline**:
+    - Sample at 2 fps, or the configured rate if higher (`rate()`).
+    - YOLOX finds objects in every frame, and `track()` links them, now keeping `src` (the frame's own object) so labels can be written back.
+    - Each track seen in at least 2 frames and at least 16 px is named once from its largest sighting.
+    - Actions come from movement along the track (walking/standing, driving/stopped).
+    - Faces and plates: a generous head-area box per person and plate-area box per vehicle. This over-masks; there is no face/plate model.
+  - **Naming**: two crops side by side in one picture per call, with fixed-choice schemas:
+    - Vehicles: colour + body type. The body list also has the neighbouring classes, so a van the detector called a bus gets "van".
+    - People: top colour, bottom colour and what they carry.
+    - Anything else: colour only.
+
+    Why: Ollama scales every picture up to ~1,100 tokens, and reading it is most of a call's time. One crop per call took ~2.2 s per object; two per picture ~1.1 s. Against single crops, two per picture agreed on the main colour 18 times in 20. A 2x2 grid (~0.5 s) only 14 in 20, drifting to "black". Free text took ~3 s and rambled ("car from cctv frame, blurry...").
+  - **Measured** on five TfL clips (~10 s each), end to end through the indexer:
+
+    | Path | Rate | × real time |
+    |---|---|---|
+    | Detector (this entry) | 2 fps | 1.0-2.9×, about 2× typical |
+    | Vision model alone (previous entry) | 2 fps | 8-11× |
+
+    With the detector, labels read like "white van", "black SUV", "person in black top and blue trousers, carrying a backpack". In the app: "Find the white van" and "Find the person carrying a bag" were confirmed by the visual check; "Did a red bus pass?" correctly found nothing; playback boxes follow the objects.
+  - **Weak spots**:
+    - Distant small vehicles get shaky labels.
+    - The detector is weak on people under ~20 px.
+    - A cancelled detector run restarts that step.
+    - 2 fps stores 4× the frame JPEGs of 0.5 fps.
+
 ## Footage sources (researched)
 
 Live feeds (for the live-ingest stretch goal; all free, check each licence before redistributing):
@@ -207,7 +247,7 @@ For UI work use Playwright **outside the repo** so the project stays dependency-
 - Recordings indexed before the H.265 change have no playable copy; Re-index makes one.
 - Event times are seconds from the first recording's local midnight. Footage spanning several days shows hours past 24.
 - Live mode is a replay of indexed footage. Real ingest is the live cameras on the Cameras page: periodic clips, not a continuous stream, and only while the app is open.
-- Throughput is the model: ~4 s a frame on a 4 GB GPU, i.e. 2-3 s of compute per second of footage at 0.5 fps, 4-5 s at 1 fps, 8-11 s at 2 fps on busy roads (`mpdecimate` only helps on static scenes). "Vast" archives need a bigger GPU, a lower sampling rate, a detector (see the speed entry), or patience; the backlog line says which.
+- Throughput: with the object detector, about 2 s of compute per second of busy footage at 2 fps on a 4 GB GPU, mostly naming objects (busier scenes take longer). Without it, the vision model alone takes ~4 s a frame: 2-3x real time at 0.5 fps, 8-11x at 2 fps. The backlog line shows the measured rate.
 - The search covers one day of your footage at a time (header day picker).
 - Caltrans streams are often offline even when listed in service; a failed capture is shown on the feed and retried next interval.
 - No authentication: the operator role is a setting. A real deployment must bind roles to identities server-side (`addAudit` already enforces the role from settings).

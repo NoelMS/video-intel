@@ -7,6 +7,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { pipeline } from 'node:stream/promises';
 import * as setup from './setup.mjs';
+import * as detector from './detector.mjs';
 
 const root = dirname(fileURLToPath(import.meta.url));
 let STORE = join(root, '.store');
@@ -82,12 +83,15 @@ let current = null, opts = { model: 'qwen3-vl:2b-instruct', sampling: 0.5, descr
 export const configure = o => { opts = { ...opts, ...o }; };
 export const busy = () => !!current;
 // Clips waiting or being indexed (feeds stop capturing while this is high) and the measured model speed.
-export const WORKING = ['queued', 'transcoding', 'extracting', 'analyzing'];
+export const WORKING = ['queued', 'transcoding', 'extracting', 'analyzing', 'naming'];
+// Frames per second sampled. The detector is cheap enough per frame for 2 fps (tracks that follow movement, boxes that
+// keep up in playback); the vision model alone is not, so it keeps the configured rate.
+const rate = () => !opts.describe && setup.detectorOk() ? Math.max(2, opts.sampling) : opts.sampling;
 export function backlog() {
   const all = listVideos(), wait = all.filter(v => WORKING.includes(v.status)), speed = all.filter(v => v.secPerFrame).slice(-10);
   const secPerFrame = speed.length ? speed.reduce((n, v) => n + v.secPerFrame, 0) / speed.length : null;
   const seconds = wait.reduce((n, v) => n + (v.duration || 0), 0);
-  return { clips: wait.length, seconds, secPerFrame, eta: secPerFrame ? Math.round(seconds * opts.sampling * secPerFrame) : null };
+  return { clips: wait.length, seconds, secPerFrame, eta: secPerFrame ? Math.round(seconds * rate() * secPerFrame) : null };
 }
 
 function kick() {
@@ -112,13 +116,14 @@ async function index(v) {
     if (current.cancelled) return rmSync(tmp, { force: true });
     renameSync(tmp, playFile(v));
   }
-  // 1. frames: sample at opts.sampling fps, drop near-identical frames (static CCTV), scale to 768 px wide
+  // 1. frames: sample at rate() fps, drop near-identical frames (static CCTV), scale to 768 px wide
+  const fast = !opts.describe && await detector.load(setup.DETECTOR_DIR);
   if (!existsSync(join(fdir, 'frames.json'))) {
     put({ ...v, status: 'extracting', progress: { done: 0, total: Math.round(v.duration) } });
     rmSync(fdir, { recursive: true, force: true }); mkdirSync(fdir, { recursive: true });
     const times = [];
     await run(setup.ffmpegPath(), ['-hide_banner', '-nostats', '-i', videoFile(v), '-an',
-      '-vf', `fps=${opts.sampling},mpdecimate,scale='min(768,iw)':-2,showinfo`, '-fps_mode', 'vfr', '-q:v', '4', join(fdir, '%06d.jpg')],
+      '-vf', `fps=${rate()},mpdecimate,scale='min(768,iw)':-2,showinfo`, '-fps_mode', 'vfr', '-q:v', '4', join(fdir, '%06d.jpg')],
     line => {
       const m = line.match(/\bpts_time:\s*([\d.]+)/);
       if (m) { times.push(+m[1]); if (times.length % 10 === 0) put({ ...get(v.id), progress: { done: Math.round(+m[1]), total: Math.round(v.duration) } }); }
@@ -126,8 +131,9 @@ async function index(v) {
     writeFileSync(join(fdir, 'frames.json'), JSON.stringify(times.map((t, i) => ({ n: i + 1, t: +t.toFixed(2) }))));
   }
   const frames = JSON.parse(readFileSync(join(fdir, 'frames.json'), 'utf8'));
-  // 2. describe each frame with the vision model (resumable: detections are saved as we go)
   if (!opts.describe && !await setup.ensureOllama()) throw new Error('Ollama is not running. Open System → Local analysis.');
+  if (fast) return indexWithDetector(v, fdir, frames);
+  // 2. describe each frame with the vision model (resumable: detections are saved as we go)
   const dets = existsSync(detFile(v.id)) ? JSON.parse(readFileSync(detFile(v.id), 'utf8')) : [];
   const doneN = new Set(dets.map(d => d.n));
   put({ ...get(v.id), status: 'analyzing', model: opts.model, sampling: opts.sampling, progress: { done: dets.length, total: frames.length } });
@@ -150,6 +156,96 @@ async function index(v) {
   if (skipped.length > dets.length / 2) throw new Error(`${skipped.length} of ${dets.length} frames could not be analysed: ${skipped.at(-1).failed}`);
   put({ ...get(v.id), status: 'ready', indexedAt: new Date().toISOString(), progress: { done: frames.length, total: frames.length },
     skipped: skipped.length, found: dets.reduce((n, d) => n + d.objects.length, 0), ...(fresh ? { secPerFrame: +((Date.now() - began) / 1000 / fresh).toFixed(1) } : {}) });
+}
+
+// With the detector: YOLOX finds objects in every frame (~70 ms each), they are linked into tracks, and the vision
+// model then names each track once from a crop of its largest sighting, instead of describing every frame.
+// Actions come from movement along the track, lighting from frame brightness.
+// ponytail: not resumable mid-way (a cancelled run starts this step over); it is minutes even for an hour of footage.
+async function indexWithDetector(v, fdir, frames) {
+  const began = Date.now(), [W, H] = (await run(setup.ffprobePath(), ['-v', 'error', '-show_entries', 'stream=width,height', '-of', 'csv=p=0', frameFile(v.id, 1)])).trim().split(',').map(Number);
+  put({ ...get(v.id), status: 'analyzing', model: opts.model, detector: `YOLOX-S (${detector.status().provider})`, sampling: rate(), progress: { done: 0, total: frames.length } });
+  const dets = [];
+  for await (const px of detector.frames(setup.ffmpegPath(), join(fdir, '%06d.jpg'))) {
+    if (current.cancelled) return;
+    const f = frames[dets.length];
+    if (!f) break;
+    const objects = (await detector.detect(px, W, H)).map(o => ({ type: o.type, label: o.cls, cls: o.cls, score: o.score, box: o.box, action: '' }));
+    dets.push({ ...f, objects, ...privacyBoxes(objects), lighting: detector.lighting(px, W, H) });
+    if (dets.length % 10 === 0) put({ ...get(v.id), progress: { done: dets.length, total: frames.length } });
+  }
+  const tracks = track(dets, Math.max(3, 2.5 / rate()));
+  for (const tr of tracks) { const action = movement(tr); for (const d of tr.dets) d.src.action = action; }
+  // Named from each track's largest sighting. One-frame tracks (mostly fragments and false alarms) and objects under
+  // ~16 px (nothing to describe) keep the detector's class name.
+  const toName = tracks.map(tr => ({ tr, rep: tr.dets.reduce((a, b) => b.box[2] * b.box[3] > a.box[2] * a.box[3] ? b : a) }))
+    .filter(({ tr, rep }) => tr.dets.length > 1 && rep.box[2] * W / 640 >= 16 && rep.box[3] * H / 360 >= 16);
+  put({ ...get(v.id), status: 'naming', progress: { done: 0, total: toName.length } });
+  for (let i = 0; i < toName.length; i += SIDE.length) {
+    if (current.cancelled) return;
+    const group = toName.slice(i, i + SIDE.length), labels = await nameObjects(v, group.map(g => g.rep), W, H);
+    group.forEach(({ tr }, k) => { if (labels[k]) for (const d of tr.dets) d.src.label = labels[k]; });
+    put({ ...get(v.id), progress: { done: Math.min(i + SIDE.length, toName.length), total: toName.length } });
+  }
+  writeFileSync(detFile(v.id), JSON.stringify(dets));
+  put({ ...get(v.id), status: 'ready', indexedAt: new Date().toISOString(), progress: { done: frames.length, total: frames.length }, skipped: 0,
+    found: dets.reduce((n, d) => n + d.objects.length, 0), tracks: tracks.length, ...(frames.length ? { secPerFrame: +((Date.now() - began) / 1000 / frames.length).toFixed(2) } : {}) });
+}
+
+// Two objects named in one call: their crops (with some context) side by side in one picture. Ollama scales every
+// picture up to ~1,100 tokens however small, and reading it is most of a call's time: one picture per object took
+// ~2.2 s each. Measured against naming each crop alone, two per picture agreed on the main colour 18 times in 20
+// (~1.1 s an object); a 2x2 grid only 14 in 20, drifting to "black" (~0.5 s an object).
+// Fixed choices instead of free text keep the reply to a few tokens and the labels to the words people search with
+// (free text rambled: "car from cctv frame, blurry, dark grey, no clear details"). An unusable reply keeps class names.
+const TILE = 256, SIDE = ['left', 'right'];
+async function nameObjects(v, reps, W, H) {
+  const crop = d => {
+    const [x, y, w, h] = [d.box[0] * W / 640, d.box[1] * H / 360, d.box[2] * W / 640, d.box[3] * H / 360];
+    const cx = Math.max(0, Math.round(x - w * 0.15)), cy = Math.max(0, Math.round(y - h * 0.15));
+    return `crop=${Math.min(W - cx, Math.round(w * 1.3))}:${Math.min(H - cy, Math.round(h * 1.3))}:${cx}:${cy}`;
+  };
+  const tiles = [...reps.map((d, i) => `[${i}:v]${crop(d)},scale=${TILE}:${TILE}:force_original_aspect_ratio=decrease,pad=${TILE}:${TILE}:-1:-1:white[t${i}]`),
+    ...SIDE.slice(reps.length).map((_, k) => `color=white:s=${TILE}x${TILE}:d=1[b${k}]`)];
+  const grid = `${reps.map((_, i) => `[t${i}]`).join('')}${SIDE.slice(reps.length).map((_, k) => `[b${k}]`).join('')}hstack=inputs=${SIDE.length}[out]`;
+  const jpg = await new Promise((res, rej) => {
+    const p = spawn(setup.ffmpegPath(), ['-v', 'error', ...reps.flatMap(d => ['-i', frameFile(v.id, d.n)]), '-filter_complex', [...tiles, grid].join(';'),
+      '-map', '[out]', '-frames:v', '1', '-f', 'image2pipe', '-c:v', 'mjpeg', '-q:v', '3', 'pipe:1'], { windowsHide: true });
+    const out = []; p.stdout.on('data', c => out.push(c)); p.on('error', rej).on('exit', c => c ? rej(new Error('Could not crop objects for naming')) : res(Buffer.concat(out)));
+  });
+  const kind = d => NAMING[d.cls] || NAMING.other;
+  const prompt = `This picture is two separate photos side by side: ${reps.map((d, i) => `${SIDE[i]} a ${d.cls}`).join(', ')}${reps.length < SIDE.length ? ', the other blank' : ''}. For each photo, describe that one object: a vehicle's main colour and body type; a person's top colour, trouser or skirt colour, and what they carry; anything else its main colour.`;
+  try {
+    const r = await chat([jpg.toString('base64')], prompt, obj(Object.fromEntries(reps.map((d, i) => [SIDE[i], kind(d).schema]))));
+    return reps.map((d, i) => r[SIDE[i]] ? kind(d).label(r[SIDE[i]], d.cls) : null);
+  } catch (e) { if (e.badReply != null) return reps.map(() => null); throw e; }
+}
+const COLOUR = { enum: ['black', 'white', 'grey', 'silver', 'red', 'blue', 'green', 'yellow', 'orange', 'brown', 'beige', 'purple', 'pink'] };
+const obj = props => ({ type: 'object', required: Object.keys(props), properties: props });
+// The body-type list includes the neighbouring classes: the detector calls some vans buses and some SUVs trucks.
+const vehicle = { schema: obj({ colour: COLOUR, body: { enum: ['car', 'hatchback', 'saloon', 'estate', 'SUV', 'taxi', 'van', 'pickup', 'truck', 'lorry', 'bus'] } }), label: r => `${r.colour} ${r.body}` };
+const NAMING = {
+  car: vehicle, truck: vehicle, bus: vehicle,
+  person: { schema: obj({ top: COLOUR, bottom: COLOUR, carrying: { enum: ['nothing', 'bag', 'backpack', 'suitcase', 'umbrella', 'phone', 'child', 'other'] } }),
+    label: r => `person in ${r.top} top and ${r.bottom} trousers${['nothing', 'other'].includes(r.carrying) ? '' : `, carrying ${r.carrying === 'child' ? 'a child' : `a ${r.carrying}`}`}` },
+  other: { schema: obj({ colour: COLOUR }), label: (r, cls) => `${r.colour} ${cls}` },
+};
+
+// Moving when the box centre travels more than half its size over the track.
+function movement(tr) {
+  const [a, b] = [tr.dets[0].box, tr.dets.at(-1).box], size = (Math.max(a[2], a[3]) + Math.max(b[2], b[3])) / 2;
+  const moving = Math.hypot(b[0] + b[2] / 2 - a[0] - a[2] / 2, b[1] + b[3] / 2 - a[1] - a[3] / 2) > size / 2;
+  return { person: moving ? 'walking' : 'standing', vehicle: moving ? 'driving' : 'stopped' }[tr.type] || (moving ? 'moving' : 'still');
+}
+
+// Privacy masks without a face or plate detector: the head of every person and the plate area of every vehicle.
+// ponytail: deliberately generous (masks a head-sized area whatever the pose); a face/plate model would be exact.
+function privacyBoxes(objects) {
+  const r = n => +n.toFixed(1);
+  return {
+    faces: objects.filter(o => o.type === 'person' && o.box[3] > 12).map(({ box: [x, y, w, h] }) => [r(x + w * 0.15), r(y), r(w * 0.7), r(Math.min(h * 0.22, w * 0.9))]),
+    plates: objects.filter(o => ['car', 'truck', 'bus', 'motorcycle'].includes(o.cls) && o.box[2] > 20).map(({ box: [x, y, w, h] }) => [r(x + w * 0.3), r(y + h * 0.6), r(w * 0.4), r(h * 0.25)]),
+  };
 }
 
 // One unusable reply (empty, cut off, or reasoning instead of JSON) is retried once, then that frame is skipped rather
@@ -294,7 +390,7 @@ export function track(frames, gapMax) {
       const best = tracks.filter(tr => !taken.has(tr) && tr.type === o.type && f.t - tr.dets.at(-1).t <= gapMax && tr.dets.at(-1).n !== f.n)
         .map(tr => { const l = tr.dets.at(-1); return [tr, iou(l.box, o.box), centreGap(l.box, o.box), agree(l, o)]; })
         .filter(([, i, g, a]) => (i >= 0.1 || g < 1.5) && a >= 0.3).map(([tr, i, g, a]) => [tr, i + a - g / 3]).sort((a, b) => b[1] - a[1])[0];
-      const d = { ...o, n: f.n, t: f.t, lighting: f.lighting };
+      const d = { ...o, n: f.n, t: f.t, lighting: f.lighting, src: o };   // src: the frame's own object, for naming
       if (best) { best[0].dets.push(d); taken.add(best[0]); } else { const tr = { type: o.type, dets: [d] }; tracks.push(tr); taken.add(tr); }
     }
   }

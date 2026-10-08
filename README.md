@@ -48,7 +48,7 @@ ES modules need an http origin, so opening `index.html` from disk does not work.
 
 1. Start the server. On first launch a setup dialog offers to install **ffmpeg**, **Ollama** and a vision model (per-user, checksum-verified, no admin rights).
 2. Switch the header to **My footage** and upload videos on the **Cameras** page with a name, timezone and start time.
-3. Indexing runs in the background (resumes after a restart). On an RTX 3050 4 GB, `qwen3-vl:2b` takes about 5 s per sampled frame at 0.5 fps.
+3. Indexing runs in the background (resumes after a restart). An object detector (YOLOX-S, installed by the same setup) finds and follows people and vehicles in every frame at 2 fps, and `qwen3-vl:2b` describes each one once: about 2 s of work per second of busy footage on an RTX 3050 4 GB.
 
 ### Where to get footage
 
@@ -107,7 +107,7 @@ Detailed diagrams (modules, runtime modes, search pipeline, re-ID, alerts, UI, d
 - **Cross-camera links are description-based** and always shown as *possible*.
 - **No baseline comparison or ablation yet.**
 - **Live mode replays indexed footage.** Live cameras are captured as periodic clips, not a continuous stream, and only while the app is open.
-- **Indexing is slower than real time** on a small GPU (~4 s a frame on a 4 GB card: 0.5 fps indexes at 2-3x real time, 1 fps at 4-5x, 2 fps at 8-11x). Capture pauses while 12 clips wait; big archives take hours.
+- **Indexing runs at about 2x real time** on a 4 GB GPU with the object detector (2 fps; busy scenes take longer), or 2-3x at 0.5 fps without it. Capture pauses while 12 clips wait; big archives take hours.
 - **Masking depends on the model** reporting faces and plates, which it often misses for distant CCTV figures.
 - **No authentication**: the operator role is a setting.
 

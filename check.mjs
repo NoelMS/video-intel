@@ -205,6 +205,23 @@ if (ffmpegPath()) {
   indexer.configure({ describe: null });
   srv.close();
 } else console.log('(ffmpeg not installed: skipped the video pipeline check)');
+
+// object detector, when installed: loads, reads frames from ffmpeg, finds nothing in a blank frame, judges brightness
+const setupMod = await import('./setup.mjs');
+if (setupMod.detectorOk() && setupMod.ffmpegPath()) {
+  const det = await import('./detector.mjs'), { spawn } = await import('node:child_process');
+  assert.ok(await det.load(setupMod.DETECTOR_DIR), 'detector loads');
+  for (const [colour, light] of [['white', 'good'], ['black', 'night']]) {
+    const jpg = `${storeDir}/${colour}-000001.jpg`;
+    mkdirSync(storeDir, { recursive: true });
+    await new Promise(r => spawn(setupMod.ffmpegPath(), ['-v', 'error', '-y', '-f', 'lavfi', '-i', `color=${colour}:s=352x288:d=1`, '-frames:v', '1', jpg]).on('exit', r));
+    let n = 0;
+    for await (const px of det.frames(setupMod.ffmpegPath(), `${storeDir}/${colour}-%06d.jpg`)) {
+      n++; assert.deepEqual(await det.detect(px, 352, 288), [], `nothing in a ${colour} frame`); assert.equal(det.lighting(px, 352, 288), light);
+    }
+    assert.equal(n, 1);
+  }
+} else console.log('(object detector not installed: skipped its check)');
 rmSync(storeDir, { recursive: true, force: true });
 
 console.log('all flows ok');

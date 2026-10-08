@@ -664,6 +664,7 @@ let setupPoll = null;
 const SETUP_PARTS = [
   ['ffmpeg', 'ffmpeg', 'Decodes your recordings, including H.265 CCTV files. About 100 MB.'],
   ['ollama', 'Ollama', 'Runs the vision model on this computer. About 1 GB.'],
+  ['detector', 'Object detector', 'Finds and follows people and vehicles in every frame, so the vision model only describes each one once. Indexing becomes several times faster. YOLOX-S on ONNX Runtime, about 150 MB.'],
 ];
 
 async function openSetup() {
@@ -671,7 +672,7 @@ async function openSetup() {
   openLayer({ kind: 'setup' });
   if (S.setup.job && !S.setup.job.finished) pollSetup();
 }
-const setupReady = s => s.ffmpeg.ok && s.ollama.running && s.model.ok;
+const setupReady = s => s.ffmpeg.ok && s.ollama.running && s.model.ok && s.detector.ok;
 
 function setupLayer() {
   const s = S.setup, j = s.job, running = j && !j.finished, model = S.setupModel ?? s.model.name;
@@ -687,6 +688,7 @@ function setupLayer() {
       <ol class="parts">
         ${row(...SETUP_PARTS[0].slice(1), s.ffmpeg.ok, 'Installed')}
         ${row(...SETUP_PARTS[1].slice(1), s.ollama.installed, `Installed${s.ollama.version ? ' · version ' + s.ollama.version : ''}${s.ollama.running ? '' : ' · not running'}`)}
+        ${row(...SETUP_PARTS[2].slice(1), s.detector.ok, 'Installed')}
         <li class="${modelOk ? 'ok' : ''}">${mark(modelOk)}<div>
           <p class="pn">Vision model <span class="tag">${modelOk ? model + ' · downloaded' : 'Choose one'}</span></p>
           <fieldset class="models" ${running ? 'disabled' : ''}><legend class="sr-only">Vision model</legend>
@@ -715,7 +717,7 @@ async function startInstall() {
     S.settings = await api.setSettings({ vision: { model, setupSeen: true } });
     S.setupModel = model;
     const s = await api.getSetup();
-    await api.installSetup({ ffmpeg: !s.ffmpeg.ok, ollama: !s.ollama.installed, model: s.model.ok && s.model.name === model ? null : model });
+    await api.installSetup({ ffmpeg: !s.ffmpeg.ok, ollama: !s.ollama.installed, model: s.model.ok && s.model.name === model ? null : model, detector: !s.detector.ok });
     pollSetup();
   } catch (e) { toast(e.message); }
 }
@@ -766,10 +768,11 @@ function playIntro() {
 // The server stores each upload; ffmpeg samples frames and the local vision model describes them (indexer.mjs).
 const TZS = ['Asia/Kolkata', 'UTC', 'Europe/London', 'America/New_York', 'Asia/Singapore', 'Australia/Sydney'];
 const mb = n => n < 1048576 ? Math.ceil(n / 1024) + ' KB' : (n / 1048576).toFixed(n < 1e8 ? 1 : 0) + ' MB';
-const WORKING = ['queued', 'transcoding', 'extracting', 'analyzing'];
-const VSTATE = { queued: 'Queued', transcoding: 'Making a browser-playable copy', extracting: 'Extracting frames', analyzing: 'Analysing frames', ready: 'Indexed', failed: 'Failed' };
+const WORKING = ['queued', 'transcoding', 'extracting', 'analyzing', 'naming'];
+const VSTATE = { queued: 'Queued', transcoding: 'Making a browser-playable copy', extracting: 'Extracting frames', analyzing: 'Analysing frames', naming: 'Describing each tracked object', ready: 'Indexed', failed: 'Failed' };
 const localNow = () => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 16); };
 let videoPoll = null;
+const counted = (v, p) => v.status === 'analyzing' ? `${p.done} / ${p.total} frames` : v.status === 'naming' ? `${p.done} / ${p.total} objects` : `${dur(p.done)} of ${dur(p.total)}`;
 
 function registerLayer() {
   const s = S.setup, ready = s && s.ffmpeg.ok && s.ollama.installed && s.model.ok;
@@ -831,7 +834,7 @@ function cameraClips(vs) {
     <div class="vthumb">${latest ? `<img src="api/videos/${latest.id}/frames/1" alt="">` : '<span class="mono dim">no frames yet</span>'}</div>
     <div><h3>${esc(vs[0].name)}</h3><p class="mono dim">${esc(vs[0].location)} · ${esc(vs[0].tz)} · ${vs.length} clips · ${hmsDur(vs.reduce((n, v) => n + (v.duration || 0), 0))}</p>
       <p class="mono dim">${ready.length} indexed${waiting ? ` · ${waiting} waiting` : ''}${failed.length ? ` · ${failed.length} failed` : ''}${latest ? ` · latest ${new Date(latest.start).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'medium', timeZone: latest.tz })}` : ''}</p>
-      ${work ? `<div class="vstate"><span class="mono">${VSTATE[work.status]}${p.total ? ` · ${work.status !== 'analyzing' ? `${dur(p.done)} of ${dur(p.total)}` : `${p.done} / ${p.total} frames`}` : ''}</span><span class="bar"><i style="width:${p.total ? Math.round(p.done / p.total * 100) : 0}%"></i></span></div>` : ''}
+      ${work ? `<div class="vstate"><span class="mono">${VSTATE[work.status]}${p.total ? ` · ${counted(work, p)}` : ''}</span><span class="bar"><i style="width:${p.total ? Math.round(p.done / p.total * 100) : 0}%"></i></span></div>` : ''}
       ${failed.length ? `<p class="warn">${esc(failed.at(-1).error || 'Failed')}</p>` : ''}
       <div class="acts">${latest ? `<button class="txt" data-act="play-orig" data-id="${latest.id}" data-t="0">Play latest clip</button>` : ''}
         <button class="txt danger" data-act="camera-del" data-key="${esc(vs[0].cameraKey)}">Remove camera</button></div></div></li>`;
@@ -839,10 +842,10 @@ function cameraClips(vs) {
 function recordingRow(v) {
   const p = v.progress || {}, pct = p.total ? Math.round(p.done / p.total * 100) : 0, working = WORKING.includes(v.status);
   return `<li class="video-item ${v.status}">
-      <div class="vthumb">${['analyzing', 'ready'].includes(v.status) ? `<img src="api/videos/${v.id}/frames/1" alt="">` : '<span class="mono dim">no frames yet</span>'}</div>
+      <div class="vthumb">${['analyzing', 'naming', 'ready'].includes(v.status) ? `<img src="api/videos/${v.id}/frames/1" alt="">` : '<span class="mono dim">no frames yet</span>'}</div>
       <div><h3>${esc(v.name)}</h3><p class="mono dim">${esc(v.location)} · ${esc(v.tz)} · ${new Date(v.start).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'medium', timeZone: v.tz })}</p>
         <p class="mono dim">${v.width}×${v.height} · ${dur(Math.round(v.duration))} · ${mb(v.size)}${v.model ? ` · ${esc(v.model)} at ${v.sampling} fps` : ''}</p>
-        <div class="vstate"><span class="mono">${VSTATE[v.status]}${working && p.total ? ` · ${v.status !== 'analyzing' ? `${dur(p.done)} of ${dur(p.total)}` : `${p.done} / ${p.total} frames`}` : ''}</span>
+        <div class="vstate"><span class="mono">${VSTATE[v.status]}${working && p.total ? ` · ${counted(v, p)}` : ''}</span>
           ${working ? `<span class="bar"><i style="width:${pct}%"></i></span>` : ''}</div>
         ${v.error ? `<p class="warn">${esc(v.error)}</p>` : ''}
         ${v.status === 'ready' && v.skipped ? `<p class="dim">${v.skipped} frame${v.skipped === 1 ? '' : 's'} could not be analysed and ${v.skipped === 1 ? 'was' : 'were'} skipped.</p>` : ''}

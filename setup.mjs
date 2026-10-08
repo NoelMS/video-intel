@@ -1,7 +1,8 @@
-// Local-analysis dependencies: ffmpeg (decodes any CCTV codec), Ollama (runs the vision model), and the model.
+// Local-analysis dependencies: ffmpeg (decodes any CCTV codec), Ollama (runs the vision model), the model, and the
+// object detector (finds and tracks objects fast, so the model only names them; detector.mjs).
 // Everything installs per-user into known places, downloads are verified against published SHA-256 sums,
 // and nothing needs admin rights.
-import { createWriteStream, createReadStream, existsSync, mkdirSync, rmSync, readdirSync, copyFileSync, statSync } from 'node:fs';
+import { createWriteStream, createReadStream, existsSync, mkdirSync, rmSync, readdirSync, copyFileSync, statSync, renameSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { createHash } from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
@@ -18,6 +19,15 @@ export const MODELS = {
 const FFMPEG_ZIP = 'https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip';
 const OLLAMA_SETUP = 'https://github.com/ollama/ollama/releases/latest/download/OllamaSetup.exe';
 const OLLAMA_SUMS = 'https://github.com/ollama/ollama/releases/latest/download/sha256sum.txt';
+// Object detector: pinned versions and hashes (the npm ones match the registry's own sha512 integrity).
+// ONNX Runtime is MIT (Microsoft), YOLOX is Apache-2.0 (Megvii).
+export const DETECTOR_DIR = join(RT, 'detector');
+const DETECTOR = [
+  { pkg: 'onnxruntime-node', url: 'https://registry.npmjs.org/onnxruntime-node/-/onnxruntime-node-1.30.0.tgz', sha256: '6e3390d6b783e7be946fad629292799da28d0b42f84856e50d2c1b0383291e75', label: 'ONNX Runtime (114 MB)' },
+  { pkg: 'onnxruntime-common', url: 'https://registry.npmjs.org/onnxruntime-common/-/onnxruntime-common-1.30.0.tgz', sha256: '7906c439e0d3e0f4048caa23b64cdfadc0f455c377f579ce1ab2a4b778f07d5f', label: 'ONNX Runtime' },
+  { file: 'yolox_s.onnx', url: 'https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_s.onnx', sha256: 'c5c2d13e59ae883e6af3b45daea64af4833a4951c92d116ec270d9ddbe998063', label: 'YOLOX-S detector (36 MB)' },
+];
+export const detectorOk = () => existsSync(join(DETECTOR_DIR, 'yolox_s.onnx')) && existsSync(join(DETECTOR_DIR, 'node_modules', 'onnxruntime-node', 'package.json'));
 
 const which = name => spawnSync('where', [name], { encoding: 'utf8', windowsHide: true }).stdout?.split(/\r?\n/).find(Boolean) || null;
 const firstExisting = list => list.find(p => p && existsSync(p)) || null;
@@ -72,6 +82,7 @@ export async function status(model) {
     ffmpeg: { ok: !!(ffmpegPath() && ffprobePath()), path: ffmpegPath() },
     ollama: { installed: !!(version || ollamaExe()), running: !!version, version },
     model: { name: model, ok: version ? await hasModel(model) : false },
+    detector: { ok: detectorOk() },
     models: MODELS,
     job,
   };
@@ -158,18 +169,45 @@ async function pullModel(name, step) {
   if (!await hasModel(name)) throw new Error(`${name} did not finish downloading.`);
 }
 
-export function install({ ffmpeg, ollama, model }) {
+// Into a temporary folder first, so a failed install never leaves a half-working detector behind.
+async function installDetector(step) {
+  const tmp = DETECTOR_DIR + '-tmp', tar = join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe');
+  rmSync(tmp, { recursive: true, force: true }); mkdirSync(tmp, { recursive: true });
+  try {
+    for (const d of DETECTOR) {
+      step.label = `Downloading ${d.label}`;
+      const file = join(tmp, d.file || d.pkg + '.tgz');
+      expectSum(await download(d.url, file, step), d.sha256, d.label);
+      if (!d.pkg) continue;
+      step.label = `Unpacking ${d.label}`;
+      const dir = join(tmp, 'node_modules', d.pkg);
+      mkdirSync(dir, { recursive: true });
+      await run(tar, ['-xzf', file, '-C', dir, '--strip-components=1']);
+      rmSync(file);
+    }
+    // keep this platform's runtime only (the package ships every platform's: 290 MB -> ~70 MB)
+    const bins = join(tmp, 'node_modules', 'onnxruntime-node', 'bin', 'napi-v6');
+    for (const os of readdirSync(bins)) for (const arch of readdirSync(join(bins, os)))
+      if (os !== process.platform || arch !== process.arch) rmSync(join(bins, os, arch), { recursive: true, force: true });
+    for (const os of readdirSync(bins)) if (!readdirSync(join(bins, os)).length) rmSync(join(bins, os), { recursive: true });
+    rmSync(DETECTOR_DIR, { recursive: true, force: true });
+    renameSync(tmp, DETECTOR_DIR);
+  } finally { rmSync(tmp, { recursive: true, force: true }); }
+}
+
+export function install({ ffmpeg, ollama, model, detector }) {
   if (busy()) throw Object.assign(new Error('An installation is already running'), { status: 409 });
   const steps = [
     ffmpeg && { key: 'ffmpeg', label: 'Downloading ffmpeg', fn: installFfmpeg },
     ollama && { key: 'ollama', label: 'Downloading Ollama', fn: installOllama },
     model && { key: 'model', label: `Downloading ${model}`, fn: s => pullModel(model, s) },
+    detector && { key: 'detector', label: 'Downloading the object detector', fn: installDetector },
   ].filter(Boolean).map(s => ({ ...s, done: 0, total: 0, state: 'waiting' }));
   job = { steps, finished: false, error: null };
   (async () => {
     for (const s of steps) {
       s.state = 'running';
-      try { await s.fn(s); s.state = 'done'; s.label = { ffmpeg: 'ffmpeg installed', ollama: 'Ollama installed', model: `${model} downloaded` }[s.key]; }
+      try { await s.fn(s); s.state = 'done'; s.label = { ffmpeg: 'ffmpeg installed', ollama: 'Ollama installed', model: `${model} downloaded`, detector: 'Object detector installed' }[s.key]; }
       catch (e) { s.state = 'failed'; job.error = e.message; break; }
     }
     job.finished = true;

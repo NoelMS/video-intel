@@ -120,6 +120,8 @@ const VIDEO_MIME = { '.mp4': 'video/mp4', '.m4v': 'video/mp4', '.mov': 'video/qu
 async function migrateModel() {
   const m = /^qwen3-vl:(\d+b)$/.exec((await api.getSettings()).vision.model);
   if (m) await api.setSettings({ vision: { model: `qwen3-vl:${m[1]}-instruct`, setupSeen: false } });
+  // Installs from before the object detector are offered it once, through the same first-launch setup prompt.
+  if (!(await api.getSettings()).vision.detectorOffered) await api.setSettings({ vision: { detectorOffered: true, ...(!setup.detectorOk() && { setupSeen: false }) } });
 }
 
 // Live feeds and archive imports (sources.mjs). Directory cameras arrive with their public URLs; any URL is limited to
@@ -261,7 +263,7 @@ const routes = [
   ['GET', /^setup$/, async () => setup.status((await api.getSettings()).vision.model)],
   ['POST', /^setup\/install$/, async req => {
     const b = await body(req);
-    return setup.install({ ffmpeg: b.ffmpeg === true, ollama: b.ollama === true, model: b.model == null ? null : validModel(b.model) });
+    return setup.install({ ffmpeg: b.ffmpeg === true, ollama: b.ollama === true, model: b.model == null ? null : validModel(b.model), detector: b.detector === true });
   }],
   ['GET', /^watches$/, () => api.getWatches()],
   ['POST', /^watches$/, async req => api.createWatch(validWatch(await body(req)))],
