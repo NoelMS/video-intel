@@ -1043,31 +1043,40 @@ function videoLayer({ id, t = 0, det = true }) {
   V.evs = allEvents.filter(e => (e.vid ?? e.cameraId) === id && e.dets?.length);   // this clip's tracks
   V.det = det && V.evs.length > 0; V.gap = 1 / (sv?.sampling || 0.5);
   const seg = ([m, l]) => `<button data-act="vmode" data-m="${m}" aria-pressed="${(m === 'det') === V.det}" ${m === 'det' && !V.evs.length ? 'disabled title="Not indexed yet"' : ''}>${l}</button>`;
-  cancelAnimationFrame(V.raf); V.t = null; V.raf = requestAnimationFrame(drawBoxes);
+  requestAnimationFrame(followVideo);
   return `<header class="ev-top"><p class="eyebrow">RECORDING · ${esc(c.name)}</p>
       <div><span class="mode" role="group" aria-label="Playback">${[['det', 'With detections'], ['orig', 'Original']].map(seg).join('')}</span>
       <button class="txt" data-act="close">Close · Esc</button></div></header>
     <h2 class="sr-only">${esc(c.name)} recording</h2>
-    <div class="vplay" style="--ar:${c.width || 16}/${c.height || 9}">
-      <video id="vplay" src="api/videos/${id}/play#t=${Math.max(0, +t - 3)}" controls autoplay muted playsinline
-        onerror="this.parentNode.outerHTML='<p class=&quot;warn&quot;>This recording cannot be played. Re-index it to make a browser-playable copy.</p>'"></video>
-      <div id="vbox" aria-hidden="true">${V.evs.map(e => `<div class="vb ${e.entity}" hidden><span>${tid(e.track)} · ${esc(e.label)}</span></div>`).join('')}</div></div>
-    <p class="mono dim">${V.evs.length ? `${V.evs.length} tracked object${V.evs.length === 1 ? '' : 's'} · boxes are interpolated between frames sampled every ${V.gap}s. ` : ''}Privacy masks apply to extracted frames only, not to playback.</p>`;
+    <div class="vfs" id="vfs"><div class="vplay" style="--ar:${c.width || 16}/${c.height || 9}">
+      <video id="vplay" src="api/videos/${id}/play#t=${Math.max(0, +t - 3)}" controls controlslist="nofullscreen" disablepictureinpicture autoplay muted playsinline
+        onerror="this.closest('.vfs').outerHTML='<p class=&quot;warn&quot;>This recording cannot be played. Re-index it to make a browser-playable copy.</p>'"></video>
+      <div id="vbox" aria-hidden="true">${V.evs.map(e => `<div class="vb ${e.entity}" hidden><span>${tid(e.track)} · ${esc(e.label)}</span></div>`).join('')}</div>
+      <button class="vfs-btn" data-act="vfull" title="Full screen (F)" aria-label="Full screen">⛶</button></div></div>
+    <p class="mono dim">${V.evs.length ? `${V.evs.length} tracked object${V.evs.length === 1 ? '' : 's'} · each box shows the object's latest sighting (frames sampled every ${+V.gap.toFixed(2)} s). ` : ''}Privacy masks apply to extracted frames only, not to playback.</p>`;
 }
-// Box at time t: interpolated inside the track, held for half a sampling interval at either end.
+// Box at time t: the track's latest sighting at or before t, held until the next one, gone one sampling interval after
+// the last. No interpolation: sliding a box towards the next sighting moved it before the object did.
 function boxAt(ds, t) {
-  if (t < ds[0].t - V.gap / 2 || t > ds.at(-1).t + V.gap / 2) return null;
-  const i = ds.findIndex(d => d.t > t);
-  if (i <= 0) return (i ? ds.at(-1) : ds[0]).box;
-  const [a, b] = [ds[i - 1], ds[i]], k = (t - a.t) / (b.t - a.t);
-  return a.box.map((n, j) => n + (b.box[j] - n) * k);
+  if (t < ds[0].t || t > ds.at(-1).t + V.gap) return null;
+  let i = ds.length - 1;
+  while (ds[i].t > t) i--;
+  return t - ds[i].t > V.gap * 1.5 ? null : ds[i].box;   // a gap in the track: nothing seen there
 }
-function drawBoxes() {
-  const v = $('#vplay'), box = $('#vbox');
-  if (!v || !box || !dlg.open) return;
-  V.raf = requestAnimationFrame(drawBoxes);
-  const t = V.det ? v.currentTime : -1;
-  if (t === V.t) return;   // paused or between video frames: nothing moved
+// Boxes follow the frame actually on screen (requestVideoFrameCallback's mediaTime); currentTime in an animation frame
+// runs a frame or two ahead of the picture.
+function followVideo() {
+  const v = $('#vplay');
+  if (!v) return;
+  V.t = null;
+  if (v.requestVideoFrameCallback) { const tick = (_, m) => { if (!v.isConnected) return; drawBoxes(m.mediaTime); v.requestVideoFrameCallback(tick); }; v.requestVideoFrameCallback(tick); }
+  else { const tick = () => { if (!v.isConnected) return; drawBoxes(v.currentTime); requestAnimationFrame(tick); }; tick(); }
+}
+function drawBoxes(now) {
+  const box = $('#vbox');
+  if (!box) return;
+  const t = V.det ? now : -1;
+  if (t === V.t) return;
   V.t = t;
   // dets are in camera time; a live/archive camera's clip starts e.t - e.vt seconds into it
   [...box.children].forEach((n, i) => {
@@ -1454,7 +1463,9 @@ const ACT = {
   },
   source: d => switchSource(d.src),
   'play-orig': d => openLayer({ kind: 'video', id: d.id, t: +d.t, det: d.det !== '0' }),
-  vmode: (d, b) => { V.det = d.m === 'det'; $$('[data-act=vmode]').forEach(x => x.setAttribute('aria-pressed', x === b)); },
+  vmode: (d, b) => { V.det = d.m === 'det'; $$('[data-act=vmode]').forEach(x => x.setAttribute('aria-pressed', x === b)); drawBoxes($('#vplay')?.currentTime ?? 0); },
+  // The picture and its boxes go full screen together; the video's own full screen would leave the boxes behind.
+  vfull: () => document.fullscreenElement ? document.exitFullscreen() : $('#vfs')?.requestFullscreen(),
   'video-reindex': async d => { await api.reindexVideo(d.id); pollVideos(); },
   'video-del': async d => {
     const v = S.videos.find(x => x.id === d.id);
@@ -1499,6 +1510,9 @@ document.addEventListener('click', e => {
   e.preventDefault();
   ACT[b.dataset.act]?.(b.dataset, b);
 });
+dlg.addEventListener('dblclick', e => { if (e.target.id === 'vplay') ACT.vfull(); });
+// If the player's own full screen is used anyway (some browsers keep its button), move it to the picture-and-boxes view.
+document.addEventListener('fullscreenchange', () => { if (document.fullscreenElement?.id === 'vplay') document.exitFullscreen().then(() => $('#vfs')?.requestFullscreen()).catch(() => {}); });
 dlg.addEventListener('click', e => {
   const r = dlg.getBoundingClientRect();
   if (e.target === dlg && (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom)) dlg.close();
@@ -1606,6 +1620,7 @@ document.addEventListener('keydown', e => {
     else if (k === 'f') $('[data-act=focusmode]')?.click();
     return;
   }
+  if (S.layer?.kind === 'video' && k === 'f') return ACT.vfull();
   if (dlg.open) return;
   if (k === '/') { e.preventDefault(); S.view === 'search' ? focusQ() : go('search', focusQ); }
   else if (k === 'm') go('memory');

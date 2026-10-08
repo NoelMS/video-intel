@@ -257,6 +257,33 @@ ES modules need an http origin. Opening `index.html` from disk will not work.
     - An 8 s one-off with the box unticked recorded 8.0 s and kept 15 s stored.
     - The TfL window had no length field, and setting every 3 min worked.
 
+- **Playback boxes, fullscreen, tracking accuracy, Cursor**:
+  - **Cursor**: the merged branch `feature/playback-transitions` still held the original commits with the Cursor trailer, so it was deleted (all of it is in the local tag `backup/before-trailer-strip`). GitHub's contributors API lists NoelMS and roshanimmanuel792 only. PR #1's page keeps its original commits; GitHub does not allow rewriting them.
+  - **Boxes moved before the objects**: `boxAt` interpolated towards the next sighting, so between samples a box slid to where the object would be up to half a second later, and appeared half an interval early. Now a box is the latest sighting at or before t, held until the next one, and gone one interval after the last; a gap in a track shows nothing.
+  - **Timing**: boxes follow the frame actually on screen (`requestVideoFrameCallback` mediaTime) instead of `currentTime` in an animation frame, which runs a frame or two ahead of the picture.
+  - **Fullscreen dropped the boxes**: the video element went full screen alone. Now `.vfs` (picture plus boxes) goes full screen, via the ⛶ button, a double-click or F. The player's own fullscreen is hidden (`controlslist=nofullscreen`), and redirected if a browser still offers it. Measured: in full screen the box layer and the video share the same rect and aspect.
+  - **Tracking accuracy**:
+    - **How it was measured** (scratch scripts, not committed): YOLOX on every frame of the five TfL clips (25 fps, 10,587 detections). At 40 ms apart, chaining by overlap gives reference identities. Each tracker was then scored on 2 or 5 fps samples by association precision/recall/F1 (are consecutive sightings in a track the same reference object, and are a reference object's consecutive sightings in one track).
+    - **The reference is conservative**: it splits an object whenever the detector misses it for over 0.2 s, so the absolute numbers understate every tracker. Compare them with each other only.
+    - **Results** (F1):
+
+      | Tracker | 2 fps | 5 fps |
+      |---|---|---|
+      | Old greedy linker | 0.70 (precision 0.63) | 0.82 |
+      | `track()` now | 0.82 | 0.90 (precision 0.83, recall 0.99) |
+
+    - **What changed in `track()`**:
+      - Global best-pairs-first matching per frame.
+      - Constant-velocity prediction from the last three sightings.
+      - Optional size check (areas within 4x).
+      - Labels optional: the detector path doesn't compare class names, which flip between car and truck.
+      - Detector settings: gate 0.75 box-sizes, tracks kept 2 s.
+    - **Tried and not taken**: tighter gates and shorter keep times scored slightly higher only by splitting objects the way the reference does.
+    - **Sampling**: with the detector, 5 fps (`rate()`), so held boxes are at most 0.2 s old and objects move less between frames.
+    - **Stored tracks**: the indexer saves each object's track (`tk`) and `dataset()` uses it (`storedTracks`), so search sees exactly what was tracked and named. Older clips without `tk` are re-tracked as before.
+    - **Naming**: only tracks seen for at least 1 s are named (blips keep the class name).
+    - **Cost**: 5 fps measured 28 s and 43 s per ~10 s clip (2.6x and 4.3x real time), against ~2x at 2 fps; naming dominates.
+
 ## Footage sources (researched)
 
 Live feeds (for the live-ingest stretch goal; all free, check each licence before redistributing):
@@ -285,7 +312,7 @@ For UI work use Playwright **outside the repo** so the project stays dependency-
 - Recordings indexed before the H.265 change have no playable copy; Re-index makes one.
 - Event times are seconds from the first recording's local midnight. Footage spanning several days shows hours past 24.
 - Live mode is a replay of indexed footage. Real ingest is the live cameras on the Cameras page: periodic clips, not a continuous stream, and only while the app is open.
-- Throughput: with the object detector, about 2 s of compute per second of busy footage at 2 fps on a 4 GB GPU, mostly naming objects (busier scenes take longer). Without it, the vision model alone takes ~4 s a frame: 2-3x real time at 0.5 fps, 8-11x at 2 fps. The backlog line shows the measured rate.
+- Throughput: with the object detector, about 2.5-4 s of compute per second of busy footage at 5 fps on a 4 GB GPU, mostly naming objects (busier scenes take longer). Without it, the vision model alone takes ~4 s a frame: 2-3x real time at 0.5 fps, 8-11x at 2 fps. The backlog line shows the measured rate.
 - The search covers one day of your footage at a time (header day picker).
 - Caltrans streams are often offline even when listed in service; a failed capture is shown on the feed and retried next interval.
 - No authentication: the operator role is a setting. A real deployment must bind roles to identities server-side (`addAudit` already enforces the role from settings).
