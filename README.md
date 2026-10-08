@@ -107,7 +107,7 @@ Detailed diagrams (modules, runtime modes, search pipeline, re-ID, alerts, UI, d
 - **Cross-camera links are description-based** and always shown as *possible*.
 - **No baseline comparison or ablation yet.**
 - **Live mode replays indexed footage.** Live cameras are captured as periodic clips, not a continuous stream, and only while the app is open.
-- **Indexing is slower than real time** on a small GPU (~10 s a frame at 0.5 fps on a 4 GB card). Capture pauses while 12 clips wait; big archives take hours.
+- **Indexing is slower than real time** on a small GPU (~4 s a frame on a 4 GB card: 0.5 fps indexes at 2-3x real time, 1 fps at 4-5x, 2 fps at 8-11x). Capture pauses while 12 clips wait; big archives take hours.
 - **Masking depends on the model** reporting faces and plates, which it often misses for distant CCTV figures.
 - **No authentication**: the operator role is a setting.
 

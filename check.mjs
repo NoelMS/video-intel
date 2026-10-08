@@ -125,6 +125,12 @@ assert.deepEqual(tr.map(t => t.dets.map(d => d.n)), [[1, 2], [3], [4]], 'overlap
   assert.deepEqual(jsonIn('<think>\nGo look {not json}</think>\n{"objects":[1]}'), { objects: [1] });
   assert.equal(jsonIn('<think>\nSo, the frame shows a bus {maybe}'), null, 'unfinished reasoning is not parsed as JSON');
   assert.equal(jsonIn(''), null);
+  // streamed reply: the object list ends where the model starts stepping one object sideways (real reply, shortened)
+  const { streamedObjects } = await import('./indexer.mjs');
+  const head = '{"faces":[[544,0,700,250]],"plates":[],"lighting":"low",\n "objects":[', o = (l, b) => `{"type":"person","label":"${l}","box":[${b}],"action":"standing"}`;
+  const s = streamedObjects(head + [o('woman in white top', '93,584,148,725'), o('man in dark jacket', '848,445,878,545'), o('man in dark jacket', '878,445,908,545')].join(',\n  '));
+  assert.ok(s.loop); assert.deepEqual(s.objects.map(x => x.box[0]), [93, 848]); assert.deepEqual(jsonIn(s.head.replace(/,\s*$/, '') + '}').faces, [[544, 0, 700, 250]]);
+  assert.equal(streamedObjects(head + [o('man in dark jacket', '848,445,878,545'), o('man in dark jacket', '100,600,140,720'), '{"type":"per'].join(',')).loop, false, 'same label elsewhere is a different person');
 }
 
 // installer downloads resume after a dropped connection and still hash the whole file

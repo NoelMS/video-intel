@@ -154,6 +154,31 @@ ES modules need an http origin. Opening `index.html` from disk will not work.
     - Boxes move with playback, with no DOM node churn and none drawn on "Original".
     - Delete a recording → Search → the page draws and searching works.
 
+- **Indexing speed: 12.5 s → ~4 s a frame** (`indexer.mjs`). Measured on qwen3-vl:2b-instruct, RTX 3050 4 GB, Ollama 0.40.1, real TfL clips:
+  - **Where the time went**: reading the image and prompt took 1 s (1,144 tokens). Writing the answer took 11.5 s (880 tokens at 77 tokens/s). On busy frames the model always filled all 12 object slots by looping, stepping one "man in a dark jacket" sideways across the frame. `dedupe()` threw those away, but they still cost ~70% of the time. It also missed most vehicles.
+  - **Fix 1, stop at the loop**: `chat()` now streams, and `describeFrame` stops reading the answer at the first looped object (`streamedObjects`: same label on the same rows). Faces, plates and lighting moved ahead of `objects` in the schema and prompt, so the cut never loses a privacy box. That order also made the model list the taxis, vans and cars it used to miss.
+  - **Fix 2, whole model on the GPU**: `num_gpu: 99`. Ollama's own estimate kept 20% of the model on the CPU, although the model fits (77 → 101 tokens/s). An Ollama out-of-memory error turns this off for the rest of the run. That fallback is untested, since this machine never ran out.
+  - **Tried and rejected**:
+    - Minified JSON: 709 → 660 tokens, not worth it.
+    - `repeat_penalty: 1.3`: fewer loops, but it dropped real objects.
+    - A pipe-separated line format with no schema: fewer tokens per object, but the model then wrote empty or junk replies.
+  - **Higher sampling rates**, two ~10.7 s clips end to end, compared with ~6× real time at 0.5 fps before:
+
+    | Rate | Frames | Time to index | × real time | Tracks |
+    |---|---|---|---|---|
+    | 0.5 fps | 5 | 20–32 s | 2–3× | 8–10 |
+    | 1 fps | 11 | 41–51 s | 4–5× | 11–15 |
+    | 2 fps | 21–22 | 87–118 s | 8–11× | 13–24 |
+
+    `mpdecimate` drops almost nothing on busy roads, so frames grow in step with fps. Higher rates catch fast vehicles (motorbikes) that 0.5 fps skips, and boxes trail less. The default stays 0.5 fps.
+  - **A detector is the next order of magnitude**, measured but not built in:
+    - YOLO11n/s via ultralytics on the CPU took 50/95 ms a frame, 40-70x faster than the vision model. Its boxes were better too: it found every car, the scooter and the pedestrians on the Piccadilly frame.
+    - The catch: it only knows class names (car, person, handbag...), with no colours or clothing.
+    - Proposed hybrid: the detector runs every frame at 2-5 fps for boxes and tracks; the vision model labels one crop per track once (~15 output tokens).
+    - It needs `onnxruntime-node` (the bundled gyan ffmpeg has no DNN filters) plus ONNX weights fetched by `setup.mjs`.
+    - Licence: Ultralytics weights are AGPL-3.0, so prefer an Apache-2.0 model (YOLOX, RT-DETR, D-FINE, RF-DETR).
+    - Training: fine-tuning a vision model for Ollama needs a CUDA PyTorch and more than 4 GB of VRAM. The local PyTorch is CPU-only. A detector pre-trained on COCO already covers people, vehicles and bags, so training only matters later. It would mean fine-tuning the detector on CCTV frames, using the vision model's labels.
+
 ## Footage sources (researched)
 
 Live feeds (for the live-ingest stretch goal; all free, check each licence before redistributing):
@@ -182,7 +207,7 @@ For UI work use Playwright **outside the repo** so the project stays dependency-
 - Recordings indexed before the H.265 change have no playable copy; Re-index makes one.
 - Event times are seconds from the first recording's local midnight. Footage spanning several days shows hours past 24.
 - Live mode is a replay of indexed footage. Real ingest is the live cameras on the Cameras page: periodic clips, not a continuous stream, and only while the app is open.
-- Throughput is the model: ~10 s a frame on a 4 GB GPU means about 5 s of compute per second of footage at 0.5 fps (less where `mpdecimate` drops static frames). "Vast" archives need a bigger GPU, a lower sampling rate, or patience; the backlog line says which.
+- Throughput is the model: ~4 s a frame on a 4 GB GPU, i.e. 2-3 s of compute per second of footage at 0.5 fps, 4-5 s at 1 fps, 8-11 s at 2 fps on busy roads (`mpdecimate` only helps on static scenes). "Vast" archives need a bigger GPU, a lower sampling rate, a detector (see the speed entry), or patience; the backlog line says which.
 - The search covers one day of your footage at a time (header day picker).
 - Caltrans streams are often offline even when listed in service; a failed capture is shown on the feed and retried next interval.
 - No authentication: the operator role is a setting. A real deployment must bind roles to identities server-side (`addAudit` already enforces the role from settings).

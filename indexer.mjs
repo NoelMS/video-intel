@@ -168,28 +168,52 @@ const BOX = { type: 'array', items: { type: 'number' }, minItems: 4, maxItems: 4
 // Lean on purpose: on a 4 GB GPU every output token costs time. Labels carry colours, clothing and carried items, so
 // separate colour/attribute lists only added tokens (measured 5.4 s vs ~45 s a frame with them on qwen3-vl:2b).
 // maxItems caps the grammar, so a small model that starts repeating itself still closes valid JSON.
-const SCHEMA = {
-  type: 'object', required: ['objects', 'faces', 'plates', 'lighting'],
+// Faces, plates and lighting come first, so cutting the object list short (describeFrame) never drops a privacy box.
+// That order also made the 2B model list the vehicles it used to miss.
+export const SCHEMA = {
+  type: 'object', required: ['faces', 'plates', 'lighting', 'objects'],
   properties: {
-    objects: { type: 'array', maxItems: 12, items: { type: 'object', required: ['type', 'label', 'box', 'action'], properties: {
-      type: { enum: ['person', 'vehicle', 'animal', 'bag', 'other'] }, label: { type: 'string' }, box: BOX, action: { type: 'string' } } } },
     faces: { type: 'array', maxItems: 8, items: BOX }, plates: { type: 'array', maxItems: 8, items: BOX },
     lighting: { enum: ['good', 'low', 'night'] },
+    objects: { type: 'array', maxItems: 12, items: { type: 'object', required: ['type', 'label', 'box', 'action'], properties: {
+      type: { enum: ['person', 'vehicle', 'animal', 'bag', 'other'] }, label: { type: 'string' }, box: BOX, action: { type: 'string' } } } },
   },
 };
 // No example labels: the 2B model copied them verbatim onto unrelated people.
-const PROMPT = `Index this CCTV frame. List each distinct person, vehicle, animal and carried bag exactly once: type; a short label with its actual colours and clothing, carried items or vehicle body type; box [x1, y1, x2, y2] in 0-1000 image coordinates; action. Then boxes of clearly visible faces and licence plates, and the lighting. Only what you can see; never repeat an object.`;
+export const PROMPT = `Index this CCTV frame. First the boxes of clearly visible faces and licence plates, and the lighting. Then list each distinct person, vehicle, animal and carried bag exactly once: type; a short label with its actual colours and clothing, carried items or vehicle body type; box [x1, y1, x2, y2] in 0-1000 image coordinates; action. Only what you can see; never repeat an object.`;
 
-async function chat(images, prompt, format) {
+// Whole model on the GPU. Ollama's own estimate kept 20% of qwen3-vl:2b on the CPU of a 4 GB card although it fits
+// (77 -> 101 tokens/s). If it does not fit, the first out-of-memory error hands the split back to Ollama for this run.
+let fullGpu = true;
+async function chat(images, prompt, format, cut) {
+  try { return await ask(images, prompt, format, cut); } catch (e) {
+    if (!fullGpu || !e.ollama || !/memory|alloc/i.test(e.message)) throw e;
+    fullGpu = false; return ask(images, prompt, format, cut);
+  }
+}
+// Streamed, so `cut` can end a reply early: given the text so far, it returns the result to use instead, or nothing.
+async function ask(images, prompt, format, cut) {
+  const ollamaErr = m => Object.assign(new Error(`Ollama: ${String(m).slice(0, 200)}`), { ollama: true });
   const res = await fetch(setup.OLLAMA + '/api/chat', { method: 'POST', body: JSON.stringify({
     // num_ctx: one frame plus the prompt is ~1-2K tokens; the model's 256K default would not fit in memory.
     // Use the -instruct tags: plain qwen3-vl:2b is the thinking variant, and on Ollama 0.40 it ignores think: false and
     // /no_think once a schema is set, reasoning until num_ctx runs out (2,940 tokens, 110 s, no JSON).
-    model: opts.model, stream: false, format, think: false, keep_alive: '10m', options: { temperature: 0, num_ctx: 4096 },
+    model: opts.model, stream: true, format, think: false, keep_alive: '10m', options: { temperature: 0, num_ctx: 4096, ...(fullGpu && { num_gpu: 99 }) },
     messages: [{ role: 'user', content: prompt, images }] }) });
-  if (!res.ok) throw new Error(`Ollama ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  if (!res.ok) throw ollamaErr(`${res.status} ${await res.text()}`);
+  const m = { content: '', thinking: '' }, dec = new TextDecoder();
+  let buf = '';
+  for await (const chunk of res.body) {
+    buf += dec.decode(chunk, { stream: true });
+    for (let i; (i = buf.indexOf('\n')) >= 0; buf = buf.slice(i + 1)) {
+      const r = JSON.parse(buf.slice(0, i));
+      if (r.error) throw ollamaErr(r.error);
+      m.content += r.message?.content || ''; m.thinking += r.message?.thinking || '';
+    }
+    const early = cut?.(m.content);
+    if (early) return early;   // leaving the loop closes the stream, and Ollama stops generating
+  }
   // Older Ollama put a thinking model's JSON in `thinking` with `content` empty, so look in both.
-  const m = (await res.json()).message;
   for (const text of [m.content, m.thinking]) { const j = jsonIn(text); if (j) return j; }
   // A reply that is all reasoning comes from the model itself (it ignores think: false), so it is never retried.
   throw Object.assign(new Error(m.thinking
@@ -214,8 +238,25 @@ const toFrame = b => {
 const sameSize = (a, b) => Math.abs(a[2] - b[2]) < 1 && Math.abs(a[3] - b[3]) < 1;
 const dedupe = os => os.filter((o, i) => !os.slice(0, i).some(p => p.type === o.type && (iou(p.box, o.box) > 0.7 || (p.label === o.label && sameSize(p.box, o.box)))));
 
+// The objects complete so far in a streamed reply, and whether the last one starts the 2B model's loop: the same label
+// again on the same rows (one object stepped sideways across the frame until maxItems). On busy frames it looped every
+// time, so ~70% of each reply was output dedupe() then threw away; cutting there took 12.5 s a frame down to ~3.7 s.
+// ponytail: two distinct same-label objects on exactly the same rows end the list early; compare crops if that bites.
+const OBJ = /\{[^{}[\]]*"box"\s*:\s*\[[^\]]*\][^{}[\]]*\}/g;
+export function streamedObjects(text) {
+  const at = text.indexOf('"objects"');
+  if (at < 0) return { objects: [], loop: false };
+  const os = [...text.slice(at).matchAll(OBJ)].map(m => { try { return JSON.parse(m[0]); } catch { return null; } }).filter(o => Array.isArray(o?.box)), last = os.at(-1);
+  const loop = !!last && os.slice(0, -1).some(o => o.label === last.label && Math.abs(o.box[1] - last.box[1]) < 3 && Math.abs(o.box[3] - last.box[3]) < 3);
+  return { objects: loop ? os.slice(0, -1) : os, loop, head: text.slice(0, at) };
+}
+const cutLoop = text => {
+  const s = streamedObjects(text);
+  return s.loop && { ...jsonIn(s.head.replace(/,\s*$/, '') + '}'), objects: s.objects };
+};
+
 export async function describeFrame(b64) {
-  const r = await chat([b64], PROMPT, SCHEMA);
+  const r = await chat([b64], PROMPT, SCHEMA, cutLoop);
   return {
     objects: dedupe((r.objects || []).map(o => ({ ...o, box: toFrame(o.box) })).filter(o => o.box[2] > 2 && o.box[3] > 2)),
     faces: (r.faces || []).map(toFrame), plates: (r.plates || []).map(toFrame), lighting: r.lighting || 'good',
