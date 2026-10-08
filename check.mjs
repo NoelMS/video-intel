@@ -78,6 +78,7 @@ assert.equal((await call('settings', 'PUT', { depth: 'fast' }, { 'content-type':
 const { get } = await import('node:http');
 const rebound = await new Promise(r => get({ host: '127.0.0.1', port: srv.address().port, path: '/api/health', headers: { host: 'evil.example' } }, res => r(res.statusCode)));
 assert.equal(rebound, 421);
+assert.equal((await call('health'))[1].stale, false, 'freshly started server is not stale');
 assert.equal((await call('memory', 'POST', { name: 'Bad', cameraId: 'cam_02', region: [600, 0, 100, 10] }))[0], 400, 'region outside frame rejected');
 assert.equal((await call('memory', 'POST', { name: 'East Gate', cameraId: 'cam_02', region: [250, 150, 120, 180] }))[0], 200);
 const [, { id }] = await call('search', 'POST', { text: 'Did anyone enter the east gate?' });

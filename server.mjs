@@ -10,6 +10,7 @@ import * as indexer from './indexer.mjs';
 import * as DEMO from './data.js';
 
 const root = dirname(fileURLToPath(import.meta.url));
+const BOOT = Date.now(), CODE = ['server.mjs', 'api.js', 'indexer.mjs', 'setup.mjs', 'data.js'];
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.json': 'application/json',
   '.md': 'text/markdown; charset=utf-8', '.webmanifest': 'application/manifest+json', '.png': 'image/png', '.jpg': 'image/jpeg', '.svg': 'image/svg+xml', '.mp4': 'video/mp4', '.webm': 'video/webm' };
 
@@ -151,7 +152,8 @@ function startSearch({ text, scope = 'all', context = null, depth }) {
 }
 
 const routes = [
-  ['GET', /^health$/, () => ({ ok: true, mode: 'server' })],
+  // stale: server code changed on disk since this process started (e.g. after git pull); the launcher restarts it
+  ['GET', /^health$/, () => ({ ok: true, mode: 'server', stale: CODE.some(f => statSync(join(root, f)).mtimeMs > BOOT) })],
   ['GET', /^cameras$/, () => api.getCameras()],
   ['GET', /^cameras\/([\w-]+)\/events$/, (_, [id]) => api.getEvents(id)],
   ['GET', /^events$/, () => api.getEvents()],
@@ -294,7 +296,7 @@ export function start(port = 0, storeFile = join(root, '.store', 'store.json'), 
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === normalize(process.argv[1])) {
-  // VI_LOG: started windowless by launcher.exe, so there is no console; write logs to a file instead.
+  // VI_LOG: started windowless by Video Intelligence.exe, so there is no console; write logs to a file instead.
   if (process.env.VI_LOG) {
     const log = (await import('node:fs')).createWriteStream(process.env.VI_LOG, { flags: 'a' });
     console.log = console.error = console.warn = (...a) => log.write(`${new Date().toISOString()} ${a.join(' ')}\n`);
