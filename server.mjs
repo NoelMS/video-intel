@@ -255,9 +255,11 @@ export function start(port = 0, storeFile = join(root, '.store', 'store.json'), 
       if (!url.pathname.startsWith('/api/')) return serveStatic(res, url.pathname);
       const path = url.pathname.slice(5), m = path.match(/^search\/(\w+)\/events$/);
       let f;
-      if (req.method === 'GET' && (f = path.match(/^videos\/([\w-]+)\/file$/))) {
+      if (req.method === 'GET' && (f = path.match(/^videos\/([\w-]+)\/(file|play)$/))) {
         const v = indexer.listVideos().find(x => x.id === f[1]);
         if (!v) throw new HttpError(404, 'Not found');
+        // play: the H.264 copy when one was made (source codec not browser-playable), else the source itself
+        if (f[2] === 'play' && existsSync(indexer.playFile(v))) return sendFile(req, res, indexer.playFile(v), 'video/mp4');
         return sendFile(req, res, indexer.videoFile(v), VIDEO_MIME[extname(v.file)] || 'application/octet-stream');
       }
       if (req.method === 'GET' && (f = path.match(/^videos\/([\w-]+)\/frames\/(\d+)$/))) return sendFile(req, res, indexer.frameFile(f[1], +f[2]), 'image/jpeg');
