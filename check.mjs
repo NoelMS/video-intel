@@ -266,12 +266,18 @@ rmSync(storeDir, { recursive: true, force: true });
 {
   const sources = await import('./sources.mjs'), mem = new Map(), cam = { cameraKey: 'feed-a' };
   sources.useStorage((k, d) => mem.get(k) ?? d, (k, v) => mem.set(k, v));
-  const w = (scope, from, to, status = 'active') => ({ scope, from, to, status });
+  const w = (scope, from, to, status = 'active', text = 'a person') => ({ text, scope, from, to, status });
   assert.equal(sources.fastWhy({ ...cam, fast: true }), 'started manually');
   mem.set('vi.watches', [w('feed-b', '00:00', '23:59'), w('all', '00:00', '23:59', 'paused')]);
   assert.equal(sources.fastWhy(cam), null, 'other camera / paused watch');
   mem.set('vi.watches', [w('feed-a', '00:00', '23:59')]);
   assert.equal(sources.fastWhy(cam), 'standing query hours');
+  // a query naming a place speeds up only the camera the place is on (the demo's seeded queries name demo cameras)
+  mem.set('vi.watches', [w('all', '00:00', '23:59', 'active', 'White van at the loading area')]);
+  mem.set('vi.memory', [{ id: 'r', name: 'Loading Area', cameraId: 'cam_08', region: [0, 0, 10, 10] }]);
+  assert.equal(sources.fastWhy(cam), null, 'a place on another camera');
+  mem.set('vi.memory', [{ id: 'r', name: 'Loading Area', cameraId: 'feed-a', region: [0, 0, 10, 10] }]);
+  assert.equal(sources.fastWhy(cam), 'standing query hours', 'the place is on this camera');
 }
 
 console.log('all flows ok');

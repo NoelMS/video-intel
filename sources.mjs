@@ -10,7 +10,7 @@ import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
 import * as setup from './setup.mjs';
 import * as indexer from './indexer.mjs';
-import { inSchedule } from './api.js';
+import { inSchedule, interpret } from './api.js';
 
 let load = () => [], save = () => {};
 export const useStorage = (l, s) => { load = l; save = s; };
@@ -91,8 +91,11 @@ export const updateFeed = (id, patch) => save('vi.feeds', listFeeds().map(f => f
 // (watch hours are this computer's clock, like the dataset's).
 const FAST_SEC = 30;
 const nowSec = () => { const d = new Date(); return d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds(); };
+// A query that names a place only speeds up the camera that place was defined on: the demo's standing queries ("the
+// rear entrance", "the loading area", on demo cameras) otherwise put every real camera on fast capture each morning.
+const covers = (w, f, refs) => { const q = interpret(w.text, refs, null); return !q.location || q.location.ref?.cameraId === f.cameraKey; };
 export const fastWhy = f => f.fast ? 'started manually'
-  : load('vi.watches', []).some(w => w.status === 'active' && (w.scope === 'all' || w.scope === f.cameraKey) && inSchedule(nowSec(), w)) ? 'standing query hours' : null;
+  : load('vi.watches', []).some(w => w.status === 'active' && (w.scope === 'all' || w.scope === f.cameraKey) && inSchedule(nowSec(), w) && covers(w, f, load('vi.memory', []))) ? 'standing query hours' : null;
 const recording = f => f.active && f.kind === 'stream' && (f.continuous || !!fastWhy(f));
 const due = f => f.next <= Date.now() || (fastWhy(f) && f.next > Date.now() + FAST_SEC * 1e3);
 export const removeFeed = id => save('vi.feeds', listFeeds().filter(f => f.id !== id));   // clips already indexed stay

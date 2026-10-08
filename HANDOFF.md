@@ -357,6 +357,10 @@ ES modules need an http origin. Opening `index.html` from disk will not work.
   - A standing query can name a live camera before its first clip is indexed.
   - The indexer takes uploads and imports before live captures, then resumes the live clips.
 
+- **Review of the collaborator's live-page commits** (`bd04faa`, `f622764`, `6cf425d`): `check.mjs`, `check-live.mjs` and a headless Live page test pass (three live cameras listed and offered as standing-query scopes; Start capture took a clip within 10 s; Stop restored the schedule; no page errors; the demo view renders).
+  - **Fixed**: `fastWhy` let any active standing query covering a camera switch it to fast capture during its hours, including the demo's seeded queries, which are still stored in real stores and name demo places ("the rear entrance", "the loading area"). Every real camera would have gone to 30 s polling or continuous recording every morning. A query naming a place now only speeds up the camera that place is defined on (`covers`); check.mjs covers it.
+  - **Note**: a user's own all-camera standing query (e.g. "Man with blue jacket", 20:00-06:00) puts every live camera on fast capture for those hours by design. That is a lot of indexing; segments beyond the backlog limit are dropped.
+
 ## Footage sources (researched)
 
 Live feeds (for the live-ingest stretch goal; all free, check each licence before redistributing):
