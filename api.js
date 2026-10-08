@@ -3,10 +3,12 @@
 import * as D from './data.js';
 
 const mem = new Map();
-const store = (() => {
+let store = (() => {
   try { if (typeof localStorage !== 'undefined') { localStorage.getItem('vi'); return localStorage; } } catch {}
   return { getItem: k => mem.get(k) ?? null, setItem: (k, v) => mem.set(k, String(v)) };
 })();
+// Server plugs in file-backed storage; the browser uses localStorage (or memory when blocked).
+export const useStorage = s => { store = s; };
 const load = (k, d) => { try { return JSON.parse(store.getItem(k)) ?? d; } catch { return d; } };
 const save = (k, v) => { try { store.setItem(k, JSON.stringify(v)); } catch {} };
 const today = () => new Date().toISOString().slice(0, 10);

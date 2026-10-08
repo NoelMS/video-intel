@@ -1,5 +1,5 @@
 // UI: one state object, string templates, delegated events. Views take API objects only.
-import * as api from './api.js';
+import { api, mode } from './service.js';
 import { frame } from './frame.js';
 import { DEMO, DAY, TZ, tracks } from './data.js';
 
@@ -58,6 +58,7 @@ function header() {
     <div class="sys mono">
       <span class="mode" role="group" aria-label="Source"><button aria-pressed="true">Recorded</button><button disabled title="Live ingest is not connected in this build">Live</button></span>
       <span class="dim">INDEX COMPLETE</span>
+      <span class="dim" title="${mode === 'server' ? 'Persisted by server.mjs' : 'Persisted in this browser only'}">STORE ${mode.toUpperCase()}</span>
       ${DEMO ? '<span class="demo" title="Footage, detections and timings are synthetic">DEMO DATA</span>' : ''}
       <button class="txt" data-act="privacy" aria-pressed="${S.privacy}">Blur ${S.privacy ? 'on' : 'off'}</button>
       <button class="txt" data-act="theme" >Theme ${theme()}</button>
@@ -420,7 +421,7 @@ function memoryView() {
 
 function investigationView() {
   return `<section class="page"><header class="page-h"><p class="eyebrow">INVESTIGATION</p><h1>Notebook.</h1>
-    <p class="lede">${S.saved.length} saved evidence · ${S.history.length} searches. Stored in this browser.</p>
+    <p class="lede">${S.saved.length} saved evidence · ${S.history.length} searches. Stored ${mode === 'server' ? 'on the server' : 'in this browser'}.</p>
     <button class="btn" data-act="export" ${S.saved.length ? '' : 'disabled'}>Export evidence package</button></header>
     <div class="nb"><section><p class="eyebrow">EVIDENCE</p>
       ${S.saved.length ? `<ol class="sheets">${S.saved.map(x => { const e = ev(x.eventId), c = cam(e.cameraId); return `<li class="sheet">

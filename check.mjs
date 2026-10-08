@@ -32,4 +32,23 @@ assert.equal(r.status, 'refusal');
 r = await s('Did anyone enter the lobby after 9:40?');                              // flow 8
 assert.equal(r.status, 'empty'); assert.ok(r.coverage.some(g => g.cameraId === 'cam_07' && g.kind === 'gap'));
 
+// server: persistence + validation + SSE stages
+const { start } = await import('./server.mjs');
+const { tmpdir } = await import('node:os');
+const store = `${tmpdir()}/vi-check-${Date.now()}.json`;
+let srv = await start(0, store);
+const base = `http://localhost:${srv.address().port}/api/`;
+const call = (p, method = 'GET', body) => fetch(base + p, { method, body: body && JSON.stringify(body) }).then(async r => [r.status, await r.json()]);
+assert.equal((await call('memory', 'POST', { name: 'Bad', cameraId: 'cam_02', region: [600, 0, 100, 10] }))[0], 400, 'region outside frame rejected');
+assert.equal((await call('memory', 'POST', { name: 'East Gate', cameraId: 'cam_02', region: [250, 150, 120, 180] }))[0], 200);
+const [, { id }] = await call('search', 'POST', { text: 'Did anyone enter the east gate?' });
+const sse = await (await fetch(base + `search/${id}/events`)).text();
+assert.match(sse, /event: stage/); assert.match(sse, /event: result\ndata: .*"status":"supported"/);
+srv.close();
+srv = await start(0, store);                                                         // restart: memory persists
+const mem = await (await fetch(`http://localhost:${srv.address().port}/api/memory`)).json();
+assert.ok(mem.some(r => r.name === 'East Gate'), 'referent survives server restart');
+srv.close();
+(await import('node:fs')).rmSync(store);
+
 console.log('all flows ok');
