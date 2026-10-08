@@ -70,19 +70,19 @@ Queries alternate between a development split (22, used for tuning) and a held-o
 
 | Method | Hit@1 | Hit@5 | MRR | Strict Hit@1 | Right camera @1 | Median time error @1 | Median latency |
 |---|---|---|---|---|---|---|---|
-| Baseline: CLIP frame retrieval | 30.2% | 46.5% | 0.363 | 25.6% | 55.8% | 3.5 s | 27 ms |
+| Baseline: CLIP frame retrieval | 30.2% | 46.5% | 0.363 | 25.6% | 55.8% | 3.5 s | 25 ms |
 | Ours: detector + tracks + label words | 25.6% | 39.5% | 0.334 | 23.3% | 69.8% | 12.7 s | 93 ms |
-| + object-crop CLIP | 27.9% | 65.1% | 0.441 | 25.6% | 53.5% | 3.8 s | 93 ms |
-| + label words with it (hybrid) | 32.6% | 67.4% | 0.471 | 30.2% | 55.8% | 1.2 s | 93 ms |
-| + moment per object from frames | 32.6% | 72.1% | 0.478 | 32.6% | 55.8% | 0.0 s | 94 ms |
-| **+ vision-model verification (full)** | **41.9%** | **76.7%** | **0.544** | **39.5%** | **67.4%** | **0.5 s** | 5.7 s |
+| + object-crop CLIP | 30.2% | 67.4% | 0.464 | 27.9% | 55.8% | 1.5 s | 93 ms |
+| + label words with it (hybrid) | 34.9% | 69.8% | 0.494 | 32.6% | 58.1% | 1.2 s | 93 ms |
+| + moment per object from frames | 34.9% | 74.4% | 0.501 | 34.9% | 58.1% | 0.0 s | 93 ms |
+| **+ vision-model verification (full)** | **44.2%** | **79.1%** | **0.567** | **41.9%** | **69.8%** | **0.3 s** | 4.4 s |
 
 By kind:
 
 | Queries | Method | Hit@1 | Hit@5 | MRR |
 |---|---|---|---|---|
 | 27 activity (official annotations) | Baseline | 11.1% | 29.6% | 0.183 |
-| | Ours (full) | **33.3%** | **70.4%** | **0.452** |
+| | Ours (full) | **37.0%** | **74.1%** | **0.489** |
 | 16 attribute (hand labels) | Baseline | **62.5%** | 75.0% | 0.667 |
 | | Ours (full) | 56.3% | **87.5%** | **0.700** |
 
@@ -107,11 +107,12 @@ word the app asks about; the final-code rows are measured on the reworded set.
 ### What the ablation shows
 
 - **Tracking + object crops** is the big step for finding the right *thing*: Hit@5 rises from 46.5% (baseline) to
-  65.1%. The baseline sees whole frames, where a person getting out of a car is a small part of a busy picture.
+  67.4%. The baseline sees whole frames, where a person getting out of a car is a small part of a busy picture.
 - **Label words** add precision on colours and kinds (Hit@1 +4.7 points).
 - **Per-object moments** fix *when*: the object's best-matching second, not its largest sighting, takes the median time
   error at rank 1 to 0 s.
-- **Verification** by the vision model is the largest Hit@1 gain (+9.3 points) at a cost of ~5 s per query. The app's
+- **Verification** by the vision model is the largest Hit@1 gain (+9.3 points) at a cost of ~4.4 s per query (the top candidates are checked
+  together; on this GPU Ollama still answers them one at a time, ~0.4-1.3 s each). The app's
   Fast depth skips it.
 - **Where it does not help:** for simple appearance queries ("red double-decker bus", "white SUV") whole-frame
   retrieval is already strong and slightly better at Hit@1 (ours is better at Hit@5). Our gains are on activities and moments, which is where
@@ -120,7 +121,7 @@ word the app asks about; the final-code rows are measured on the reworded set.
 ### Latency
 
 The baseline answers in ~11 ms (one text embedding and a dot product per indexed second). Ours answers in ~90 ms
-without verification and ~5 s with the vision model's check of up to 6 candidates (the evaluation runs at Deep depth).
+without verification and ~4.4 s with the vision model's check of up to 6 candidates (the evaluation runs at Deep depth).
 In the app, Fast depth skips the check, Balanced checks the top 3 and Deep the top 6. Indexing is the slow part: 5 fps detection plus naming runs at roughly 2.5-4x real time
 on busy footage on this 4 GB GPU.
 

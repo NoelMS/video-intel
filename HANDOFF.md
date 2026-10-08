@@ -328,8 +328,8 @@ ES modules need an http origin. Opening `index.html` from disk will not work.
     - Queries: 27 activity queries from MEVA annotations plus 16 hand-labelled attribute queries, alternating dev/held-out.
     - `eval.mjs` switches the search day per query (MEVA is 2018, TfL 2026).
     - Ablation switches go through the search request (`ablation: { image, frames, labels, verify, weights }`, evaluation only).
-  - **Results** (all 43 queries, full vs baseline): Hit@1 41.9% vs 30.2%, Hit@5 76.7% vs 46.5%, MRR 0.544 vs 0.363, median time error 0.5 s vs 3.5 s (re-run after the "parked red car" rewording), latency ~5 s vs ~11 ms (~90 ms without verification).
-    - Activities gain most: Hit@5 29.6% to 70.4%. On attributes the baseline is slightly better at Hit@1.
+  - **Results** (all 43 queries, full vs baseline): Hit@1 44.2% vs 30.2%, Hit@5 79.1% vs 46.5%, MRR 0.567 vs 0.363, median time error 0.3 s vs 3.5 s (latest run; see the change log), latency ~5 s vs ~11 ms (~90 ms without verification).
+    - Activities gain most: Hit@5 29.6% to 74.1%. On attributes the baseline is slightly better at Hit@1.
     - The held-out first run tied on Hit@1; the vocabulary fix (below) was found on held-out output, and both runs are reported in WRITEUP.md.
   - **Tuning (dev only)**: `OPEN_VOCAB = { object: 0.5, frame: 0, labels: 0.5, pass: 0.75 }`. The frame similarity picks each object's moment (`result.moments`, clip time) but is not used for ranking: ranking by it hurt (dev Hit@5 0.64 -> 0.41 at 0.2).
   - **Vocabulary fix**: on real footage, a query's attribute words are only words that occur in real labels. Previously demo words ("jacket") became required attributes no real label has.
@@ -368,6 +368,13 @@ ES modules need an http origin. Opening `index.html` from disk will not work.
   - **Time label**: "in the last hour" is measured back from the end of the day's footage, not from now. The TIME row now says "last 1 h of the footage (21:30 → 21:35, all of it)", so a 5-minute archive isn't mistaken for a parsing error.
   - **Pause all capture** (`PUT capture {paused}`, `sources.pauseAll`, `vi.capturePaused`): one button on Live and on the Cameras live section. It stops the scheduler tick and every continuous recorder (finished segments are still queued); per-camera pause state is kept and returns on resume. `GET ingest` reports `capturePaused`.
   - **Verified** headlessly (copies of the stores on N:): texting (held-out) ours ✓ #1, baseline ✓ #5; talking ours ✓ #1, baseline ✓ #1; an unlisted question shows "compare by eye"; the benchmark table shows 6 rows; "cross the junction" asks where the junction is; Pause/Resume all flips `capturePaused` from both pages. No page errors.
+
+- **Improvement rounds** (each: find a failure in `eval/results-all.md`, fix it in general, tune only on dev, re-run all + held-out):
+  - **Round 1**:
+    - "Find a person opening the door of a building" returned a clarify question instead of an answer: "the door" matched the place words. A place word followed by "of a/an/some" is now a kind of place, not one to define (check.mjs covers it). All 43: Hit@1 41.9% → 44.2%, Hit@5 76.7% → 79.1%, MRR 0.544 → 0.567. Held-out unchanged (that query is in dev).
+    - The vision checks are now sent together (`Promise.all` in `search`). On this GPU Ollama still answers one at a time (~0.4-1.3 s each), so median deep latency went 5.7 s → 4.4 s. `fullGpu` (indexer.mjs) switches off for the server's life after one out-of-memory error; competing Ollama clients slow every check ~2.5x.
+    - Tried and dropped: lowering the candidate gate (`pass` 0.75 → 0.6/0.5) changed nothing on dev. "Find the person carrying a white bag" misses because the label says "carrying a bag" with no bag colour; fixing it needs a naming-prompt change and a re-index.
+    - "Walking across the car park" still asks where the car park is, which is the intended clarify-once behaviour, scored as a miss.
 
 ## Footage sources (researched)
 

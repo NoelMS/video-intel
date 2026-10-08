@@ -4,12 +4,12 @@ Hit = right camera and a time within the answer span +-5 s (strict: +-2 s). Foot
 
 | Method | Hit@1 | Hit@5 | MRR | Strict Hit@1 | Right camera @1 | Median time error @1 (s) | Median latency (ms) | p90 latency (ms) |
 |---|---|---|---|---|---|---|---|---|
-| Baseline: CLIP frame retrieval (1 frame/s) | 23.8% | 42.9% | 0.317 | 19.0% | 52.4% | 12.0 | 15 | 19 |
-| Ours: detector + tracks + label words | 19.0% | 33.3% | 0.267 | 14.3% | 61.9% | 14.3 | 94 | 110 |
-| Ours: detector + tracks + object-crop CLIP | 14.3% | 71.4% | 0.374 | 14.3% | 42.9% | 5.4 | 93 | 109 |
-| Ours: + label words (objects + labels) | 23.8% | 76.2% | 0.436 | 23.8% | 47.6% | 1.2 | 94 | 110 |
-| Ours: + frame context and moment per object | 23.8% | 76.2% | 0.419 | 23.8% | 47.6% | 0.0 | 94 | 111 |
-| Ours: + vision-model verification (full) | 28.6% | 76.2% | 0.456 | 28.6% | 61.9% | 5.8 | 6398 | 8083 |
+| Baseline: CLIP frame retrieval (1 frame/s) | 23.8% | 42.9% | 0.317 | 19.0% | 52.4% | 12.0 | 11 | 13 |
+| Ours: detector + tracks + label words | 19.0% | 33.3% | 0.267 | 14.3% | 61.9% | 14.3 | 78 | 94 |
+| Ours: detector + tracks + object-crop CLIP | 14.3% | 71.4% | 0.374 | 14.3% | 42.9% | 5.4 | 93 | 108 |
+| Ours: + label words (objects + labels) | 23.8% | 76.2% | 0.436 | 23.8% | 47.6% | 1.2 | 93 | 110 |
+| Ours: + frame context and moment per object | 23.8% | 76.2% | 0.419 | 23.8% | 47.6% | 0.0 | 94 | 113 |
+| Ours: + vision-model verification (full) | 28.6% | 76.2% | 0.456 | 28.6% | 61.9% | 5.8 | 6025 | 7429 |
 
 <details><summary>Per query (rank of the first hit, -1 = none in the top 10; top result)</summary>
 

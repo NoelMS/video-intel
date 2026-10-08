@@ -59,6 +59,10 @@ assert.equal(api.inSchedule(api.sec('23:00:00'), { from: '20:00', to: '06:00' })
 // a thing no label names is a find (refused by the checks), never "what happened"; a watch for it never fires
 assert.equal(api.interpret('Find an elephant', []).intent, 'find');
 assert.equal(api.interpret('What happened after 9:40?', []).intent, 'activity');
+// a specific place is asked about; "the door of a building" is any door
+assert.equal(api.interpret('Did a white van cross the junction?', []).location?.term, 'junction');
+assert.equal(api.interpret('Find a person opening the door of a building', []).location, null);
+assert.equal(api.interpret('Find a person opening the door of the bank', []).location?.term, 'door');
 assert.equal(api.matchWatch({ text: 'Notify me if an elephant appears', scope: 'all', from: '00:00', to: '23:59' }, api.event('ev_091412'), []), false);
 
 // §63 evidence board ordering

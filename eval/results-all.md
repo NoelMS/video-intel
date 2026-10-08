@@ -4,12 +4,12 @@ Hit = right camera and a time within the answer span +-5 s (strict: +-2 s). Foot
 
 | Method | Hit@1 | Hit@5 | MRR | Strict Hit@1 | Right camera @1 | Median time error @1 (s) | Median latency (ms) | p90 latency (ms) |
 |---|---|---|---|---|---|---|---|---|
-| Baseline: CLIP frame retrieval (1 frame/s) | 30.2% | 46.5% | 0.363 | 25.6% | 55.8% | 3.5 | 27 | 31 |
-| Ours: detector + tracks + label words | 25.6% | 39.5% | 0.334 | 23.3% | 69.8% | 12.7 | 93 | 109 |
-| Ours: detector + tracks + object-crop CLIP | 27.9% | 65.1% | 0.441 | 25.6% | 53.5% | 3.8 | 93 | 108 |
-| Ours: + label words (objects + labels) | 32.6% | 67.4% | 0.471 | 30.2% | 55.8% | 1.2 | 93 | 123 |
-| Ours: + frame context and moment per object | 32.6% | 72.1% | 0.478 | 32.6% | 55.8% | 0.0 | 94 | 111 |
-| Ours: + vision-model verification (full) | 41.9% | 76.7% | 0.544 | 39.5% | 67.4% | 0.5 | 5670 | 13202 |
+| Baseline: CLIP frame retrieval (1 frame/s) | 30.2% | 46.5% | 0.363 | 25.6% | 55.8% | 3.5 | 25 | 28 |
+| Ours: detector + tracks + label words | 25.6% | 39.5% | 0.334 | 23.3% | 69.8% | 12.7 | 93 | 108 |
+| Ours: detector + tracks + object-crop CLIP | 30.2% | 67.4% | 0.464 | 27.9% | 55.8% | 1.5 | 93 | 109 |
+| Ours: + label words (objects + labels) | 34.9% | 69.8% | 0.494 | 32.6% | 58.1% | 1.2 | 93 | 110 |
+| Ours: + frame context and moment per object | 34.9% | 74.4% | 0.501 | 34.9% | 58.1% | 0.0 | 93 | 109 |
+| Ours: + vision-model verification (full) | 44.2% | 79.1% | 0.567 | 41.9% | 69.8% | 0.3 | 4420 | 7480 |
 
 <details><summary>Per query (rank of the first hit, -1 = none in the top 10; top result)</summary>
 
@@ -23,10 +23,10 @@ Hit = right camera and a time within the answer span +-5 s (strict: +-2 s). Foot
 | Find a person going in through a doorway | 0 (MEVA G419 16:02:15) | 1 (MEVA G508 16:00:00) | 1 (MEVA G506 16:05:00) | 1 (MEVA G506 16:05:00) | 1 (MEVA G506 16:05:00) | 1 (MEVA G506 16:05:00) |
 | Find a person getting out of a car | -1 (MEVA G339 16:00:39) | 6 (MEVA G506 16:01:11) | 2 (MEVA G506 16:01:40) | 2 (MEVA G506 16:01:40) | 2 (MEVA G506 16:01:47) | 2 (MEVA G506 16:01:47) |
 | Find a person loading a car | -1 (MEVA G505 16:03:58) | -1 (MEVA G506 16:01:11) | -1 (MEVA G328 16:04:48) | -1 (MEVA G328 16:04:48) | -1 (MEVA G328 16:03:15) | -1 (MEVA G506 16:01:39) |
-| Find a person opening the door of a building | -1 (MEVA G419 16:00:28) | -1 (-) | -1 (-) | -1 (-) | -1 (-) | -1 (-) |
+| Find a person opening the door of a building | -1 (MEVA G419 16:00:28) | -1 (MEVA G508 16:00:00) | 0 (MEVA G506 16:05:00) | 0 (MEVA G506 16:05:00) | 0 (MEVA G506 16:05:00) | 0 (MEVA G506 16:05:00) |
 | Find a person opening the boot of a car | -1 (MEVA G505 16:03:05) | -1 (MEVA G506 16:01:11) | 1 (MEVA G328 16:04:48) | 1 (MEVA G328 16:04:48) | 1 (MEVA G328 16:03:04) | 0 (MEVA G506 16:00:49) |
 | Find a person opening a car door | -1 (MEVA G505 16:03:05) | 6 (MEVA G506 16:01:11) | -1 (MEVA G505 16:01:54) | -1 (MEVA G505 16:01:54) | 2 (MEVA G505 16:01:57) | 0 (MEVA G339 16:00:36) |
-| Find a person picking something up | -1 (MEVA G419 16:00:28) | 5 (MEVA G508 16:00:00) | 1 (MEVA G506 16:00:23) | 1 (MEVA G506 16:00:23) | -1 (MEVA G506 16:00:48) | -1 (MEVA G506 16:00:48) |
+| Find a person picking something up | -1 (MEVA G419 16:00:28) | 5 (MEVA G508 16:00:00) | 1 (MEVA G506 16:00:23) | 1 (MEVA G506 16:00:23) | -1 (MEVA G506 16:00:48) | -1 (MEVA G508 16:02:03) |
 | Find a person putting something down | -1 (MEVA G420 16:01:26) | -1 (MEVA G508 16:00:00) | -1 (MEVA G505 16:02:38) | -1 (MEVA G505 16:02:38) | 2 (MEVA G505 16:02:37) | 2 (MEVA G505 16:02:37) |
 | Find a person sitting down | -1 (MEVA G419 16:02:08) | -1 (MEVA G508 16:00:00) | 4 (MEVA G506 16:01:11) | 4 (MEVA G506 16:01:11) | 4 (MEVA G506 16:01:12) | 3 (MEVA G506 16:01:12) |
 | Find a person standing up | -1 (MEVA G419 16:00:28) | 2 (MEVA G508 16:00:00) | 7 (MEVA G339 16:02:56) | 7 (MEVA G339 16:02:56) | 7 (MEVA G339 16:02:58) | 7 (MEVA G339 16:02:58) |

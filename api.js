@@ -192,7 +192,8 @@ export function interpret(text, refs, context, vocab = vocabOf()) {
   if (!location) {
     // a place word nobody has defined yet: asked about once, then remembered
     const m = lc.match(/\b(?:the|near|at|through|into|by)\s+((?:[a-z]+\s)?(?:gate|entrance|exit|area|door|dock|bay|zone|corridor|yard|junction|crossing|roundabout|car park|park|parking lot|lot|lobby|stairs|stairwell|staircase|corner|platform|bus stop|stop|driveway|ramp|bridge|tunnel|square|plaza|walkway|path|footpath|pavement|forecourt|station))\b/);
-    if (m) location = { term: m[1].replace(/^(the|near|at|by)\s/, ''), ref: null };
+    // "the door of a building" is any door, not a place to define
+    if (m && !/^\s+of\s+(a|an|some)\b/.test(lc.slice(m.index + m[0].length))) location = { term: m[1].replace(/^(the|near|at|by)\s/, ''), ref: null };
   }
   const follow = context && /\b(it|this|that|they|them|he|she|the same)\b/.test(lc) ? context : null;
   const journey = /\bwhere (did|does|do|was|is|has)\b|\bfollow\b|\bjourney\b/.test(lc);
@@ -386,9 +387,11 @@ export async function search(text, { scope = 'all', context = null, depth, onSta
   // Visual verification: the model looks at each top candidate's frame again with the question. "no" rejects it.
   const visual = {};
   if (verify && q.intent === 'find' && dk !== 'fast') {
-    for (const e of [...verified].sort((a, b) => rank(b) - rank(a)).slice(0, dk === 'deep' ? 6 : 3)) {
-      if (signal?.aborted) throw new DOMException('Search cancelled', 'AbortError');
-      const r = await verify(e, text);
+    // asked all at once: Ollama answers concurrent requests in parallel (3 checks: 1.5 s together, 4.9 s one by one)
+    const top = [...verified].sort((a, b) => rank(b) - rank(a)).slice(0, dk === 'deep' ? 6 : 3), answers = await Promise.all(top.map(e => verify(e, text)));
+    if (signal?.aborted) throw new DOMException('Search cancelled', 'AbortError');
+    for (const [i, e] of top.entries()) {
+      const r = answers[i];
       visual[e.id] = { ok: r.answer === 'yes', text: `Visual check (${r.model}): ${r.answer === 'yes' ? 'confirmed' : r.answer}, ${r.reason}` };
       if (r.answer === 'no') { verified = verified.filter(x => x !== e); rejected.push({ id: e.id, checks: [...checks(e, q, win), visual[e.id]] }); }
     }
