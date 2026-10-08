@@ -55,7 +55,7 @@ ES modules need an http origin. Opening `index.html` from disk will not work.
 - Re-identification is never stated as fact: `strong` = "LIKELY SAME ENTITY", `likely` = "LIKELY CONTINUATION", `possible` = "POSSIBLE CONTINUATION".
 - Region crossing is computed from geometry (`pathHits`), not stored flags.
 - Coverage gaps and offline cameras are always reported, never silently searched.
-- Commits: author `NoelMS <183172768+NoelMS@users.noreply.github.com>`, no co-author trailer.
+- Commits: don't list AI agents or coding tools as co-authors.
 
 ## Change log
 
