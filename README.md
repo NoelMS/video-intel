@@ -30,12 +30,11 @@ Built for problem statement **HNX26EPS05: Multi-Stream Video Intelligence with C
 
 ## Quick start
 
-Requires Windows for the one-click launcher; Node.js 18+ anywhere else.
+**Windows:** open **`Video Intelligence.exe`**. A small launcher window installs a private Node.js if needed (checksum-verified, no admin), starts the local server and opens the app. No console window appears. If an outdated server from before a `git pull` is still running, the launcher restarts it.
+
+Other systems need Node.js 18+:
 
 ```bash
-# Windows, one click: installs Node if needed, starts the server on :8000, opens the app window
-Start.cmd
-
 # Any OS
 npm start                    # http://localhost:8000  (PORT, VI_STORE env vars)
 
@@ -96,7 +95,7 @@ Detailed diagrams (modules, runtime modes, search pipeline, re-ID, alerts, UI, d
 | `indexer.mjs` | Upload queue, frame sampling, vision model calls, tracking, cross-camera linking |
 | `setup.mjs` | Installs ffmpeg, Ollama and the model |
 | `data.js`, `frame.js` | Demo dataset and frame rendering |
-| `Start.cmd`, `start.ps1`, `launcher.cs` | Windows launcher (no console window) |
+| `Video Intelligence.exe`, `launcher.cs`, `icon.ico` | Windows launcher window (source, build command inside `launcher.cs`) |
 | `sw.js`, `offline.html`, `manifest.webmanifest` | Installable app; restarts the server from the app icon |
 | `check.mjs` | Test suite |
 
@@ -129,3 +128,4 @@ Detailed diagrams (modules, runtime modes, search pipeline, re-ID, alerts, UI, d
 | `5dfc129` | **Index and search your own recordings with a local vision model** |
 | `720dcbf` | H.265 and other non-browser codecs become playable |
 | `f693ad3` | Playback with tracked boxes, page transitions, new scrollbar |
+| — | Launcher window replaces `Start.cmd`; outdated servers are restarted; setup dialog restyled |
