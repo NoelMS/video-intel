@@ -102,6 +102,8 @@ export async function download(url, file, step) {
   step.done = 0; step.total = 0;
   for (let attempt = 0; ; attempt++) {
     const res = await fetch(url, step.done ? { headers: { range: `bytes=${step.done}-` } } : {}).catch(e => e);
+    // 416 on a resume means there was nothing left to fetch: the connection dropped after the last byte arrived
+    if (res.status === 416 && step.total && step.done >= step.total) break;
     const resumed = res.status === 206;
     if (res instanceof Error || !(res.ok || resumed)) {
       if (attempt < 8 && !(res.status >= 400 && res.status < 500)) { await new Promise(r => setTimeout(r, 2000)); continue; }

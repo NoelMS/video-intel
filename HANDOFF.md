@@ -309,6 +309,15 @@ ES modules need an http origin. Opening `index.html` from disk will not work.
   - Answer clips: `GET /api/videos/:id/clip?t=&dur=` (2-60 s) re-encodes `dur` seconds centred on `t`, so the clip starts exactly there (verified: 4.000 s). It is served as an attachment and the temp file is removed afterwards. The evidence view has "Download clip (10 s)".
   - check.mjs covers time phrases, `phrase()`, the open-vocab blend and the CLIP tokenizer ids.
 
+- **Phase 5: judge-day import and clarify-once, verified end to end**:
+  - **Bulk import** (Add a recording):
+    - The selection may include a `manifest.csv` (`file,camera,start,tz,location`; start is wall-clock time in tz). Each file's start is, in order: the manifest's; a time in the file name (`20240305_101500`, `2024-03-05T10-15-00`...); the recording time stored in the file (ffprobe `creation_time`, when "use the recording time stored in each file" is ticked); then the form's.
+    - The server takes `startLocal` (wall clock + tz, converted with `sources.localToUtc`) and `startFrom=file`. `camera` sets `cameraKey`, so files of one camera are one camera.
+  - **Verified headlessly** (playwright-core + system Chrome, against a server the test starts and restarts):
+    - A manifest for two files plus a time-named third gave starts 14:09 / 14:16 / 14:08 UTC, with the two manifest files as one "Gate cam".
+    - "Did a white van pass through the main gate?" asked once, then answered after the place was drawn. After a server restart the same question and a different one about the main gate were both answered without asking.
+  - `setup.download`: a 416 on a resume when every byte has arrived now counts as complete (a MEVA import failed on it).
+
 ## Footage sources (researched)
 
 Live feeds (for the live-ingest stretch goal; all free, check each licence before redistributing):

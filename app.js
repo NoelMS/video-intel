@@ -790,8 +790,10 @@ function registerLayer() {
     ${ready ? '' : `<p class="warn">Local analysis is not set up yet, so recordings cannot be indexed. <button class="txt" data-act="setup">Set it up</button></p>`}
     <form class="reg" data-form="register">
       <fieldset><legend class="eyebrow">FILES</legend>
-        <label class="fld">Video files<input type="file" name="files" accept="video/*,.mkv,.avi,.ts,.mts,.m2ts,.dav,.h264,.h265,.hevc" multiple required></label>
-        <p class="dim">Any format ffmpeg reads, including H.265 CCTV exports. Several files become one camera each, named after the file.</p></fieldset>
+        <label class="fld">Video files<input type="file" name="files" accept="video/*,.mkv,.avi,.ts,.mts,.m2ts,.dav,.h264,.h265,.hevc,.csv" multiple required></label>
+        <p class="dim">Any format ffmpeg reads, including H.265 CCTV exports. Several files become one camera each, named after the file.
+          For many cameras, add a <b>manifest.csv</b> to the selection with columns <span class="mono">file,camera,start,tz,location</span> (start as <span class="mono">2024-03-05 10:15:00</span> in that timezone); files with the same camera become one camera. A start time in a file name (<span class="mono">20240305_101500</span>) is used too.</p>
+        <label class="opt"><input type="checkbox" name="fileTime" checked> <span>Otherwise use the recording time stored in each file, when it has one</span></label></fieldset>
       <fieldset><legend class="eyebrow">CAMERA</legend>
         <label class="fld">Camera name<input name="name" maxlength="80" placeholder="Required for a single file"></label>
         <label class="fld">Location<input name="location" maxlength="120" placeholder="e.g. North entrance"></label>
@@ -804,18 +806,35 @@ function registerLayer() {
     </form>`;
 }
 
+// manifest.csv: header row naming the columns (file, camera, start, tz, location), one row per video file.
+// ponytail: plain comma-separated values, no quoted commas; enough for file names and camera names.
+function parseManifest(text) {
+  const [head, ...lines] = text.split(/\r?\n/).filter(l => l.trim()), cols = head.toLowerCase().split(',').map(c => c.trim());
+  if (!cols.includes('file')) throw new Error('manifest.csv needs a "file" column');
+  return new Map(lines.map(l => { const v = l.split(',').map(x => x.trim()), row = Object.fromEntries(cols.map((c, i) => [c, v[i] || ''])); return [row.file.toLowerCase(), row]; }));
+}
+// A start time in a file name: 20240305_101500, 2024-03-05 10-15-00, 2024-03-05T10:15:00 ...
+const fileTime = n => { const m = n.match(/(20\d\d)[-_.]?(\d\d)[-_.]?(\d\d)[ T_-]?(\d\d)[-_.:h]?(\d\d)[-_.:m]?(\d\d)/); return m ? `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}` : null; };
+
 async function uploadFootage(form) {
-  const fd = new FormData(form), files = [...form.files.files], name = fd.get('name').trim(), prog = $('#reg-progress');
-  if (files.length === 1 && !name) return form.name.focus(), toast('Name the camera');
+  const fd = new FormData(form), all = [...form.files.files], name = fd.get('name').trim(), prog = $('#reg-progress');
+  const csv = all.find(f => /\.csv$/i.test(f.name)), files = all.filter(f => f !== csv);
+  let rows = null;
+  try { rows = csv ? parseManifest(await csv.text()) : null; } catch (e) { return toast(e.message); }
+  if (!files.length) return toast('Choose the video files too');
+  if (files.length === 1 && !name && !rows?.get(files[0].name.toLowerCase())?.camera) return form.name.focus(), toast('Name the camera');
   const start = new Date(fd.get('start'));
   if (Number.isNaN(+start)) return toast('Enter when the recording started');
   const meta = { location: fd.get('location').trim(), tz: fd.get('tz').trim(), start: start.toISOString(), neighbors: fd.getAll('neighbors').join(',') };
   form.querySelector('button.primary').disabled = true;
   let ok = 0;
   for (const f of files) {
-    const nm = files.length === 1 ? name : f.name.replace(/\.[^.]+$/, '');
+    // start: the manifest's, else one in the file name, else (optionally) the file's own recording time, else the form's
+    const row = rows?.get(f.name.toLowerCase()), named = fileTime(f.name), nm = row?.camera || (files.length === 1 && name ? name : f.name.replace(/\.[^.]+$/, ''));
+    const own = { name: nm, ...(row?.camera ? { camera: row.camera } : {}), ...(row?.tz ? { tz: row.tz } : {}), ...(row?.location ? { location: row.location } : {}),
+      ...(row?.start ? { startLocal: row.start.replace(' ', 'T') } : named ? { startLocal: named } : fd.get('fileTime') ? { startFrom: 'file' } : {}) };
     try {
-      await api.uploadVideo(f, { ...meta, name: nm }, (done, total) => {
+      await api.uploadVideo(f, { ...meta, ...own }, (done, total) => {
         prog.innerHTML = `<div class="indexing"><p class="eyebrow">UPLOADING ${files.length > 1 ? `${ok + 1} OF ${files.length}` : ''}</p><p class="claim-s">${esc(nm)}</p>
           <div class="progress"><span class="bar"><i style="width:${total ? done / total * 100 : 0}%"></i></span></div><p class="mono dim">${mb(done)} / ${mb(total)}</p></div>`;
       });

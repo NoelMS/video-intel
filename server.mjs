@@ -94,8 +94,14 @@ const VIDEO_EXT = ['.mp4', '.m4v', '.mov', '.mkv', '.avi', '.webm', '.ts', '.mts
 function validUpload(qs, type) {
   const g = k => qs.get(k) ?? '';
   if (!/^(video\/[\w.+-]+|application\/octet-stream)$/.test(type)) bad('Send the video as video/* or application/octet-stream');
-  const out = { name: str(g('name'), 80, 'name'), location: str(g('location') || 'Unspecified', 120, 'location'), tz: str(g('tz'), 64, 'tz'), start: iso(g('start'), 'start') };
+  const out = { name: str(g('name'), 80, 'name'), location: str(g('location') || 'Unspecified', 120, 'location'), tz: str(g('tz'), 64, 'tz') };
   try { new Intl.DateTimeFormat('en', { timeZone: out.tz }); } catch { bad('unknown timezone'); }
+  // start: an ISO instant, or startLocal: wall-clock time in tz (from a manifest or a file name, e.g. 2024-03-05T10:15:00)
+  const local = /^(\d{4}-\d\d-\d\d)[T ](\d\d:\d\d(?::\d\d)?)$/.exec(g('startLocal'));
+  out.start = local ? sources.localToUtc(local[1], local[2].length === 5 ? local[2] + ':00' : local[2], out.tz) : iso(g('start'), 'start');
+  if (g('startFrom') === 'file') out.startFrom = 'file';   // prefer the recording time stored in the file, when it has one
+  // clips with the same camera name are one camera (several files from one camera, or a manifest)
+  if (g('camera')) out.cameraKey = 'cam-' + str(g('camera'), 80, 'camera').toLowerCase().replace(/[^a-z0-9]+/g, '-');
   out.neighbors = g('neighbors') ? g('neighbors').split(',').map(n => indexer.listVideos().some(v => v.id === n) ? n : bad(`unknown neighbouring camera ${n}`)) : [];
   out.labels = g('labels') ? g('labels').split(',').slice(0, 10).map(l => str(l, 60, 'label')) : [];
   out.ext = (g('filename').match(/\.[a-z0-9]{1,5}$/i)?.[0] || '').toLowerCase();
@@ -188,7 +194,10 @@ function liveStream(req, res, url) {
 }
 
 const runs = new Map(); // search id -> { events, done, listeners, ac }
-function startSearch({ text, scope = 'all', context = null, depth }) {
+// ablation (evaluation only): { image: false } drops the image similarity, { labels: false } the label words,
+// { verify: false } the vision model's look at the top candidates. Defaults are the full pipeline.
+function startSearch({ text, scope = 'all', context = null, depth, ablation = {} }) {
+  if (typeof ablation !== 'object' || !ablation) bad('ablation must be an object');
   if (typeof text !== 'string' || !text.trim() || text.length > 500) bad('text must be 1-500 characters');
   if (scope !== 'all' && !api.camera(scope)) bad('unknown scope');
   if (context && !api.object(context.track)?.name) bad('unknown context track');
@@ -196,8 +205,8 @@ function startSearch({ text, scope = 'all', context = null, depth }) {
   const id = Math.random().toString(36).slice(2, 10), run = { events: [], done: false, listeners: new Set(), ac: new AbortController() };
   const push = (type, data) => { run.events.push([type, data]); run.listeners.forEach(l => l(type, data)); if (type !== 'stage') run.done = true; };
   const real = api.ds().source === 'mine';   // real footage: no simulated stage delays, and the local model verifies
-  (real ? baseline.objectSimilarities(text) : Promise.resolve(null)).then(sim => api.search(text, { scope, context, depth, signal: run.ac.signal, onStage: s => push('stage', s),
-    speed: real ? 0 : 1, sim, verify: real ? (e, question) => indexer.verify(e, question) : null }))
+  (real && ablation.image !== false ? baseline.objectSimilarities(text) : Promise.resolve(null)).then(sim => api.search(text, { scope, context, depth, signal: run.ac.signal, onStage: s => push('stage', s),
+    speed: real ? 0 : 1, sim, labels: ablation.labels !== false, verify: real && ablation.verify !== false ? (e, question) => indexer.verify(e, question) : null }))
     .then(r => push('result', r))
     .catch(e => push(e.name === 'AbortError' ? 'cancelled' : 'fail', { message: e.message }));
   runs.set(id, run);

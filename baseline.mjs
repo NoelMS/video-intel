@@ -51,7 +51,7 @@ export async function baselineSearch(text, { k = 10, scope = 'all' } = {}) {
       em.rows.forEach((r, i) => {
         if (r.kind !== 'frame' || !at.has(`${vid}:${r.n}`)) return;
         const t = at.get(`${vid}:${r.n}`);
-        hits.push({ cameraId: c.id, vid, n: r.n, t, time: api.hms(c.t0 + t), score: +embed.cosine(q, em.vec(i)).toFixed(4) });
+        hits.push({ cameraId: c.id, vid, n: r.n, vt: r.t, t, time: api.hms(c.t0 + t), score: +embed.cosine(q, em.vec(i)).toFixed(4) });
       });
     }
   }

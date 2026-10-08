@@ -38,10 +38,11 @@ const run = (exe, args, onErrLine) => new Promise((res, rej) => {
 });
 
 export async function probe(file) {
-  const out = JSON.parse(await run(setup.ffprobePath(), ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height,codec_name:format=duration', '-of', 'json', file]));
-  const s = out.streams?.[0];
+  const out = JSON.parse(await run(setup.ffprobePath(), ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height,codec_name:format=duration:format_tags=creation_time', '-of', 'json', file]));
+  const s = out.streams?.[0], created = Date.parse(out.format?.tags?.creation_time || '');
   if (!s || !(+out.format?.duration > 0)) throw new Error('No playable video stream found');
-  return { duration: +out.format.duration, width: s.width, height: s.height, codec: s.codec_name };
+  // created: when the file says it was recorded (cameras and phones write it; 1970/2000 placeholders are ignored)
+  return { duration: +out.format.duration, width: s.width, height: s.height, codec: s.codec_name, ...(created > Date.parse('2001-01-01') ? { created: new Date(created).toISOString() } : {}) };
 }
 
 // Stream an upload to disk, probe it, queue it. meta is validated by the server.
@@ -56,7 +57,10 @@ async function ingest(meta, write) {
   const v = { id, ...meta, file: id + meta.ext, status: 'queued', progress: { done: 0, total: 0 }, error: null, added: new Date().toISOString() };
   delete v.ext;
   await write(videoFile(v));
-  try { Object.assign(v, await probe(videoFile(v)), { size: statSync(videoFile(v)).size }); }
+  try {
+    Object.assign(v, await probe(videoFile(v)), { size: statSync(videoFile(v)).size });
+    if (v.startFrom === 'file' && v.created) v.start = v.created;   // "use each file's own recording time"
+  }
   catch (e) { rmSync(videoFile(v), { force: true }); throw Object.assign(new Error(`${meta.name}: ${e.message}`), { status: 422 }); }
   save('vi.videos', [...listVideos(), v]);
   kick();

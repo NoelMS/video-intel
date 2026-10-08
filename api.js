@@ -328,7 +328,7 @@ export function openVocab(pool, q, sim) {
   return Object.assign(rank, { pass: e => (q.attrs.length > 0 && attrsOk(e)) || rank(e) >= OPEN_VOCAB.pass });
 }
 
-export async function search(text, { scope = 'all', context = null, depth, onStage = () => {}, signal, speed = 1, verify = null, sim = null } = {}) {
+export async function search(text, { scope = 'all', context = null, depth, onStage = () => {}, signal, speed = 1, verify = null, sim = null, labels = true } = {}) {
   const t0 = Date.now();
   const refs = (await getMemory()).filter(r => camera(r.cameraId)), settings = await getSettings();
   const dk = DEPTHS[depth] ? depth : settings.depth, dp = DEPTHS[dk];
@@ -354,7 +354,7 @@ export async function search(text, { scope = 'all', context = null, depth, onSta
   await step('retrieval', `Indexed segments across ${searched.length} camera${searched.length === 1 ? '' : 's'}`, Math.floor(coveredSec / 10));
 
   const pool = D.events.filter(e => searched.some(c => c.id === e.cameraId));
-  const rank = openVocab(pool, q, sim);
+  const rank = openVocab(pool, labels ? q : { ...q, attrs: [] }, sim);
   const semantic = pool.filter(e => (!q.entity || e.entity === q.entity) && (!q.follow || e.track === q.follow.track) && rank.pass(e))
     .sort((a, b) => rank(b) - rank(a)).slice(0, dp.topK);
   await step('semantic', `Semantic matches · top ${dp.topK === 999 ? 'all' : dp.topK}`, semantic.length);
