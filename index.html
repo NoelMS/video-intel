@@ -1,6 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
+  <script>try { const t = localStorage.getItem('vi.theme'); if (t) document.documentElement.dataset.theme = t; } catch {}</script>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Video Intelligence</title>
@@ -14,6 +15,7 @@
   <div id="app"></div>
   <dialog id="layer" class="layer"></dialog>
   <div id="peek" hidden></div>
+  <div id="cursor" hidden aria-hidden="true"></div>
   <div id="toasts" aria-live="polite"></div>
   <script type="module" src="app.js"></script>
 </body>

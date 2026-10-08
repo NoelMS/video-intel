@@ -42,6 +42,8 @@ ES modules need an http origin. Opening `index.html` from disk will not work.
 
 - **Initial**: core loop and all 10 §174 flows. Supported, ambiguous, refusal and empty result states; evidence viewer; temporal zoom; journey (sequence, topology, timeline); referent resolver and memory; notebook and markdown export; command palette; privacy blur; responsive layout.
 
+- **Theme + cursor**: light/dark/system theme (tokens redefined under `[data-theme]` and `prefers-color-scheme`; choice kept in `localStorage['vi.theme']`, set pre-paint in `index.html`). Camera frames stay dark on purpose because they stand in for footage. Contextual cursor label (`CURSOR` table in `app.js`) shows only for a fine pointer with motion allowed; it re-parents into the dialog while one is open, because of the top layer.
+
 ## Next up
 
-Live mode (honest simulation), standing queries and alerts, diagnostics drawer, pipeline settings, upload and camera registration, custom cursor, opening sequence, evidence board, light theme, and server-side persistence.
+Live mode (honest simulation), standing queries and alerts, diagnostics drawer, pipeline settings, upload and camera registration, custom cursor, opening sequence, evidence board and server-side persistence.

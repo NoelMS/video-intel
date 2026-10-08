@@ -60,6 +60,7 @@ function header() {
       <span class="dim">INDEX COMPLETE</span>
       ${DEMO ? '<span class="demo" title="Footage, detections and timings are synthetic">DEMO DATA</span>' : ''}
       <button class="txt" data-act="privacy" aria-pressed="${S.privacy}">Blur ${S.privacy ? 'on' : 'off'}</button>
+      <button class="txt" data-act="theme" >Theme ${theme()}</button>
       <button class="txt" data-act="palette" aria-label="Open command menu">Ctrl K</button>
     </div>
   </header>`;
@@ -676,7 +677,17 @@ const keepName = () => { if ($('#res-name')) S.resolver.name = $('#res-name').va
 const redrawResolver = () => S.resolver.inline ? render() : openLayer({ kind: 'resolver' });
 let notesTimer;
 
+const THEMES = ['system', 'light', 'dark'];
+const theme = () => document.documentElement.dataset.theme || 'system';
+function cycleTheme() {
+  const next = THEMES[(THEMES.indexOf(theme()) + 1) % 3];
+  if (next === 'system') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = next;
+  try { next === 'system' ? localStorage.removeItem('vi.theme') : localStorage.setItem('vi.theme', next); } catch {}
+  render();
+}
+
 const ACT = {
+  theme: cycleTheme,
   go: d => go(d.view), ask: d => run(d.q), open: (d, el) => openEvidence(d.id, +(d.off || 0), el),
   close: () => dlg.close(), cancel: () => S.abort?.abort(), unfollow: () => set({ context: null }),
   privacy: () => set({ privacy: !S.privacy }), palette: () => openLayer({ kind: 'palette' }), zoom: d => zoomTo(+d.z),
@@ -788,6 +799,20 @@ document.addEventListener('keydown', e => {
   else if (k === 'e' && S.res?.primary) openEvidence(S.res.primary);
   else if (k === 'c' && S.res?.candidates) openLayer({ kind: 'compare', ids: S.res.candidates });
 });
+
+// Contextual cursor label (desktop, fine pointer, motion allowed only). Native cursor stays visible.
+const CURSOR = [['[data-draw]', 'DRAW'], ['#scrub, .tl-ticks', 'SCRUB'], ['.crop, .sight-frame, .cand-frame', 'INSPECT'], ['[data-act=camera], [data-act=res-cam]', 'OPEN'],
+  ['[data-act=compare], [data-act=bridge]', 'COMPARE'], ['.lead, .thumb, .hood button, .mk, .consist button, .pp button, .sheet > button', 'VIEW']];
+if (matchMedia('(hover: hover) and (pointer: fine)').matches && !reduced.matches) {
+  const cur = $('#cursor');
+  addEventListener('pointermove', e => {
+    const hit = CURSOR.find(([sel]) => e.target.closest?.(sel));
+    const host = dlg.open ? dlg : document.body;
+    if (cur.parentNode !== host) host.append(cur);
+    cur.hidden = !hit;
+    if (hit) { cur.textContent = hit[1]; cur.style.transform = `translate(${e.clientX + 16}px, ${e.clientY + 16}px)`; }
+  }, { passive: true });
+}
 
 // ---------- render ----------
 const VIEWS = { search: searchView, cameras: camerasView, memory: memoryView, investigation: investigationView };

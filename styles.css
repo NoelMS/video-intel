@@ -9,6 +9,20 @@
   --top: 57px;
   color-scheme: dark;
 }
+:root[data-theme=light] {
+  --bg: #eeebe4; --surface: #e6e2d9; --raised: #f6f3ec; --line: #d5d0c4; --line-strong: #b5afa1;
+  --text: #1c1b18; --text-2: #4b4841; --muted: #767165;
+  --accent: #9a5f0c; --ok: #3d6b41; --warn: #a3561f; --err: #ad3d2c;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme=dark]) {
+    --bg: #eeebe4; --surface: #e6e2d9; --raised: #f6f3ec; --line: #d5d0c4; --line-strong: #b5afa1;
+  --text: #1c1b18; --text-2: #4b4841; --muted: #767165;
+  --accent: #9a5f0c; --ok: #3d6b41; --warn: #a3561f; --err: #ad3d2c;
+  color-scheme: light;
+  }
+}
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 var(--sans); -webkit-font-smoothing: antialiased; }
 h1, h2, h3, p, dl, figure { margin: 0; }
@@ -29,7 +43,7 @@ button:disabled { cursor: not-allowed; opacity: .4; }
 .btn { border: 1px solid var(--line-strong); padding: 9px 16px; font: 700 11.5px/1 var(--sans); letter-spacing: .12em; text-transform: uppercase; border-radius: var(--r1); transition: border-color var(--fast), background var(--fast); }
 .btn:hover:not(:disabled) { border-color: var(--text-2); }
 .btn.primary { background: var(--text); color: var(--bg); border-color: var(--text); }
-.btn.primary:hover:not(:disabled) { background: #fff8ea; }
+.btn.primary:hover:not(:disabled) { background: color-mix(in srgb, var(--text) 86%, var(--bg)); }
 .txt { color: var(--text-2); text-decoration: underline; text-decoration-color: var(--line-strong); text-underline-offset: 3px; font-size: 13px; }
 .txt:hover:not(:disabled) { color: var(--text); text-decoration-color: currentColor; }
 .txt.danger:hover { color: var(--err); }
@@ -335,6 +349,7 @@ dialog.palette { width: min(640px, 92vw); margin-top: 12vh; padding: 0; }
 .pal li[aria-selected=true] { background: var(--surface); border-color: var(--accent); color: var(--text); }
 .pal p { padding: 10px 20px; border-top: 1px solid var(--line); font-size: 10.5px; }
 
+#cursor { position: fixed; left: 0; top: 0; z-index: 90; pointer-events: none; font: 500 9.5px/1 var(--mono); letter-spacing: .14em; color: var(--accent); padding: 3px 5px; border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent); background: var(--bg); }
 #toasts { position: fixed; right: 20px; bottom: 20px; display: grid; gap: 8px; z-index: 80; }
 #toasts p { background: var(--raised); border-left: 2px solid var(--ok); padding: 10px 14px; font: 12px var(--mono); animation: rise var(--med) var(--ease); }
 
