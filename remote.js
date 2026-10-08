@@ -75,3 +75,12 @@ export const uploadVideo = (file, meta, onProgress) => new Promise((resolve, rej
   x.onerror = () => reject(new Error('Upload failed: the local server did not answer'));
   x.send(file);
 });
+export const getIngest = () => j('ingest');
+export const sourcesTfl = () => j('sources/tfl');
+export const sourcesCaltrans = d => j('sources/caltrans/' + d);
+export const sourcesMeva = prefix => j('sources/meva?prefix=' + encodeURIComponent(prefix));
+export const addFeeds = items => j('feeds', { method: 'POST', body: { items } });
+export const updateFeed = (id, patch) => j('feeds/' + id, { method: 'PUT', body: patch });
+export const removeFeed = id => j('feeds/' + id, { method: 'DELETE' });
+export const addImports = body => j('imports', { method: 'POST', body });
+export const clearImports = () => j('imports', { method: 'DELETE' });

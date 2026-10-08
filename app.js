@@ -79,6 +79,7 @@ function header() {
     <button class="mark" data-act="go" data-view="search">Multi-Stream <b>Video Intelligence</b></button>
     <nav aria-label="Primary">${nav.map(([v, l]) => `<button data-act="go" data-view="${v}" ${S.view === v ? 'aria-current="page"' : ''}>${l}</button>`).join('')}</nav>
     <div class="sys">
+      ${!ds().DEMO && ds().days?.length > 1 ? `<label class="day-pick"><span class="sr-only">Day</span><select data-day aria-label="Day of footage">${ds().days.map(d => `<option value="${d}" ${d === ds().DAY ? 'selected' : ''}>${new Date(d + 'T12:00Z').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</option>`).join('')}</select></label>` : ''}
       <span class="mode" role="group" aria-label="Footage"><button aria-pressed="${!!ds().DEMO}" data-act="source" data-src="demo" title="Synthetic demo footage">Demo</button><button aria-pressed="${!ds().DEMO}" data-act="source" data-src="mine" ${mode === 'server' ? 'title="Your indexed recordings"' : 'disabled title="Needs the local server: open Video Intelligence.exe"'}>My footage</button></span>
       <button class="icon-btn" data-act="go" data-view="system" aria-label="Privacy masking ${pv().faces || pv().plates ? 'on' : 'off'}" title="Privacy masking ${pv().faces || pv().plates ? 'on' : 'off'}">${ICON[pv().faces || pv().plates ? 'shield' : 'shieldOff']}</button>
       <button class="icon-btn" data-act="theme" aria-label="Theme: ${theme()}" title="Theme: ${theme()}">${ICON[theme()]}</button>
@@ -419,7 +420,7 @@ function camerasView() {
   const avail = cams.filter(c => c.status !== 'offline'), gaps = api.coverageGaps(cams, W);
   return `<section class="page"><header class="page-h"><p class="eyebrow">CAMERAS</p><h1>The archive.</h1>
     <p class="lede">${cams.length} indexed camera${cams.length === 1 ? '' : 's'}${cams.length ? ` · ${ds().DAY} · ${hm(W[0])} → ${hm(W[1])} ${ds().TZ}` : ''}. ${ds().DEMO ? 'Synthetic demo footage.' : 'Your recordings, analysed on this computer.'}</p>
-    ${ds().DEMO ? '' : '<button class="btn" data-act="register">Add a recording</button>'}</header>
+    ${ds().DEMO ? '' : '<div class="acts"><button class="btn" data-act="register">Add a recording</button><button class="btn" data-act="src-open" data-tab="tfl">Add live cameras</button><button class="btn" data-act="src-open" data-tab="meva">Import an archive</button></div>'}</header>
     ${ds().DEMO ? '' : `<div id="videos">${videosList()}</div>`}
     ${cams.length ? `<section class="health" aria-label="Index health"><dl class="kv">
       <div><dt>Cameras</dt><dd>${avail.length} / ${cams.length} available</dd></div>
@@ -557,7 +558,7 @@ dlg.addEventListener('close', () => {
   S.layer = null; S.reveal = false; dlg.innerHTML = '';
 });
 
-const LAYERS = { setup: () => setupLayer(), intro: () => introLayer(), register: () => registerLayer(), video: L => videoLayer(L), diag: () => diagLayer(), evidence: evidenceLayer, compare: compareLayer, passport: passportLayer, resolver: () => resolver(S.resolver), palette: () => paletteLayer() };
+const LAYERS = { sources: () => sourcesLayer(), setup: () => setupLayer(), intro: () => introLayer(), register: () => registerLayer(), video: L => videoLayer(L), diag: () => diagLayer(), evidence: evidenceLayer, compare: compareLayer, passport: passportLayer, resolver: () => resolver(S.resolver), palette: () => paletteLayer() };
 
 function evidenceLayer({ id, off = 0, focus = false }) {
   const e = ev(id), c = cam(e.cameraId), q = S.res?.interp;
@@ -595,7 +596,7 @@ function evidenceLayer({ id, off = 0, focus = false }) {
           <button class="btn primary" data-act="save" data-id="${id}">Save evidence</button>
           <button class="btn" data-act="follow" data-track="${e.track}">Follow this ${noun}</button>
           <button class="txt" data-act="exportone" data-id="${id}" ${exportBlock() ? `disabled title="${exportBlock()}"` : ''}>Export evidence</button>
-          ${cam(e.cameraId).real ? `<button class="txt" data-act="play-orig" data-id="${e.cameraId}" data-t="${e.t}">Play with detections</button><button class="txt" data-act="play-orig" data-id="${e.cameraId}" data-t="${e.t}" data-det="0">Play original video</button><a class="txt" href="api/videos/${e.cameraId}/file" download>Download source</a>`
+          ${cam(e.cameraId).real ? `<button class="txt" data-act="play-orig" data-id="${e.vid ?? e.cameraId}" data-t="${e.vt ?? e.t}">Play with detections</button><button class="txt" data-act="play-orig" data-id="${e.vid ?? e.cameraId}" data-t="${e.vt ?? e.t}" data-det="0">Play original video</button><a class="txt" href="api/videos/${e.vid ?? e.cameraId}/file" download>Download source</a>`
             : '<button class="txt" disabled title="No source video in the demo">Download clip</button>'}
           ${maskable(e) ? `<button class="txt" data-act="reveal" data-id="${id}" ${S.settings.operator.role !== 'supervisor' && !S.reveal ? 'disabled title="Requires the supervisor role"' : ''}>${S.reveal ? 'Restore masking' : 'Reveal protected regions'}</button>` : ''}</div>
         ${S.reveal ? '<p class="warn mono">PROTECTED REGIONS REVEALED · this view is logged in the audit trail</p>' : ''}
@@ -816,13 +817,30 @@ async function uploadFootage(form) {
 }
 
 function videosList() {
-  if (!S.videos.length) return `<section class="empty-footage"><p><b>No recordings yet.</b> Add recorded video; it is analysed here by ${esc(S.settings.vision.model)} and never leaves this computer.</p>
-    <button class="btn primary" data-act="register">Add a recording</button></section>`;
-  return `<section class="reg-list"><p class="eyebrow">RECORDINGS</p><ol>${S.videos.map(v => {
-    const p = v.progress || {}, pct = p.total ? Math.round(p.done / p.total * 100) : 0, working = WORKING.includes(v.status);
-    return `<li class="video-item ${v.status}">
+  if (!S.videos.length && !S.ingest?.feeds.length && !S.ingest?.imports.length) return `<section class="empty-footage"><p><b>No recordings yet.</b> Add your own recordings, capture public live cameras, or import an archive. Everything is analysed here by ${esc(S.settings.vision.model)} and never leaves this computer.</p>
+    <div class="acts"><button class="btn primary" data-act="register">Add a recording</button><button class="btn" data-act="src-open" data-tab="tfl">Add live cameras</button><button class="btn" data-act="src-open" data-tab="meva">Import an archive</button></div></section>`;
+  const groups = new Map();
+  for (const v of S.videos) groups.set(v.cameraKey || v.id, [...(groups.get(v.cameraKey || v.id) || []), v]);
+  return `${ingestPanel()}<section class="reg-list"><p class="eyebrow">RECORDINGS</p><ol>${[...groups.values()].map(vs => vs.length > 1 ? cameraClips(vs) : recordingRow(vs[0])).join('')}</ol></section>`;
+}
+// A live or archive camera: many clips, shown as one row with counts and the clip being indexed now.
+function cameraClips(vs) {
+  const ready = vs.filter(v => v.status === 'ready'), work = vs.find(v => WORKING.includes(v.status) && v.status !== 'queued'), failed = vs.filter(v => v.status === 'failed');
+  const waiting = vs.filter(v => WORKING.includes(v.status)).length, latest = ready.at(-1), p = work?.progress || {};
+  return `<li class="video-item ${work ? 'analyzing' : 'ready'}">
+    <div class="vthumb">${latest ? `<img src="api/videos/${latest.id}/frames/1" alt="">` : '<span class="mono dim">no frames yet</span>'}</div>
+    <div><h3>${esc(vs[0].name)}</h3><p class="mono dim">${esc(vs[0].location)} · ${esc(vs[0].tz)} · ${vs.length} clips · ${hmsDur(vs.reduce((n, v) => n + (v.duration || 0), 0))}</p>
+      <p class="mono dim">${ready.length} indexed${waiting ? ` · ${waiting} waiting` : ''}${failed.length ? ` · ${failed.length} failed` : ''}${latest ? ` · latest ${new Date(latest.start).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'medium', timeZone: latest.tz })}` : ''}</p>
+      ${work ? `<div class="vstate"><span class="mono">${VSTATE[work.status]}${p.total ? ` · ${work.status !== 'analyzing' ? `${dur(p.done)} of ${dur(p.total)}` : `${p.done} / ${p.total} frames`}` : ''}</span><span class="bar"><i style="width:${p.total ? Math.round(p.done / p.total * 100) : 0}%"></i></span></div>` : ''}
+      ${failed.length ? `<p class="warn">${esc(failed.at(-1).error || 'Failed')}</p>` : ''}
+      <div class="acts">${latest ? `<button class="txt" data-act="play-orig" data-id="${latest.id}" data-t="0">Play latest clip</button>` : ''}
+        <button class="txt danger" data-act="camera-del" data-key="${esc(vs[0].cameraKey)}">Remove camera</button></div></div></li>`;
+}
+function recordingRow(v) {
+  const p = v.progress || {}, pct = p.total ? Math.round(p.done / p.total * 100) : 0, working = WORKING.includes(v.status);
+  return `<li class="video-item ${v.status}">
       <div class="vthumb">${['analyzing', 'ready'].includes(v.status) ? `<img src="api/videos/${v.id}/frames/1" alt="">` : '<span class="mono dim">no frames yet</span>'}</div>
-      <div><h3>${esc(v.name)}</h3><p class="mono dim">${esc(v.location)} · ${esc(v.tz)} · ${new Date(v.start).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'medium' })}</p>
+      <div><h3>${esc(v.name)}</h3><p class="mono dim">${esc(v.location)} · ${esc(v.tz)} · ${new Date(v.start).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'medium', timeZone: v.tz })}</p>
         <p class="mono dim">${v.width}×${v.height} · ${dur(Math.round(v.duration))} · ${mb(v.size)}${v.model ? ` · ${esc(v.model)} at ${v.sampling} fps` : ''}</p>
         <div class="vstate"><span class="mono">${VSTATE[v.status]}${working && p.total ? ` · ${v.status !== 'analyzing' ? `${dur(p.done)} of ${dur(p.total)}` : `${p.done} / ${p.total} frames`}` : ''}</span>
           ${working ? `<span class="bar"><i style="width:${pct}%"></i></span>` : ''}</div>
@@ -831,7 +849,7 @@ function videosList() {
         ${v.status === 'ready' && v.found === 0 ? '<p class="dim">No people, vehicles, animals or bags were found. The index only looks for these, so screen recordings usually have none.</p>' : ''}
         <div class="acts">${v.status === 'ready' ? `<button class="txt" data-act="play-orig" data-id="${v.id}" data-t="0">Play with detections</button><button class="txt" data-act="play-orig" data-id="${v.id}" data-t="0" data-det="0">Play original</button>` : ''}
           ${['ready', 'failed'].includes(v.status) ? `<button class="txt" data-act="video-reindex" data-id="${v.id}">Re-index</button>` : ''}
-          <button class="txt danger" data-act="video-del" data-id="${v.id}">Remove</button></div></div></li>`; }).join('')}</ol></section>`;
+          <button class="txt danger" data-act="video-del" data-id="${v.id}">Remove</button></div></div></li>`;
 }
 
 // Poll while anything is indexing; refresh the dataset when a recording becomes searchable.
@@ -839,20 +857,154 @@ function pollVideos() {
   clearTimeout(videoPoll);
   const tick = async () => {
     const readyBefore = S.videos.filter(v => v.status === 'ready').length;
-    S.videos = await api.getVideos();
+    [S.videos, S.ingest] = await Promise.all([api.getVideos(), api.getIngest()]);
     if (S.videos.filter(v => v.status === 'ready').length !== readyBefore && !ds().DEMO) { await loadDataset(); if (S.view !== 'cameras') render(); }
     if (S.view === 'cameras') $('#videos') ? ($('#videos').innerHTML = videosList()) : render();
-    if (S.videos.some(v => WORKING.includes(v.status))) videoPoll = setTimeout(tick, 2000);
+    // keep polling while clips index, imports download, or live cameras capture
+    if (S.videos.some(v => WORKING.includes(v.status)) || S.ingest.imports.some(i => ['queued', 'downloading'].includes(i.state)) || S.ingest.feeds.some(f => f.active)) videoPoll = setTimeout(tick, 3000);
     else if (S.view === 'cameras') render();
   };
   tick();
+}
+
+// ---------- public cameras and archives (sources.mjs) ----------
+// Live cameras capture a clip every few minutes while the app is open; archives download clips. Everything is
+// indexed by the same local model, so the backlog line says how long the queue will take at the measured speed.
+const SRC = { tab: 'tfl', q: '', sel: new Map(), district: 7, list: [], loading: false, interval: 10, clipSec: 30, mevaPrefix: 'drops-123-r13/', meva: null, mevaSel: new Set() };
+const TABS = [['tfl', 'London'], ['caltrans', 'California'], ['stream', 'Stream URL'], ['meva', 'MEVA archive'], ['urls', 'Video URLs']];
+const hmsDur = s => s >= 3600 ? `${Math.floor(s / 3600)} h ${Math.round(s % 3600 / 60)} min` : s >= 60 ? `${Math.round(s / 60)} min` : `${Math.round(s)} s`;
+const estimate = seconds => { const spf = S.ingest?.backlog?.secPerFrame; return spf ? hmsDur(seconds * S.settings.pipeline.sampling * spf) : null; };
+
+async function openSources(tab) {
+  SRC.tab = tab; SRC.q = ''; SRC.sel.clear();
+  openLayer({ kind: 'sources' });
+  await loadSourceList();
+}
+async function loadSourceList() {
+  if (!['tfl', 'caltrans', 'meva'].includes(SRC.tab)) return;
+  SRC.loading = true; drawSources();
+  try {
+    if (SRC.tab === 'tfl') SRC.list = await api.sourcesTfl();
+    if (SRC.tab === 'caltrans') SRC.list = await api.sourcesCaltrans(SRC.district);
+    if (SRC.tab === 'meva') { SRC.meva = await api.sourcesMeva(SRC.mevaPrefix); SRC.mevaSel.clear(); }
+  } catch (e) { toast(e.message); }
+  SRC.loading = false; drawSources();
+}
+const drawSources = () => { if (S.layer?.kind === 'sources' && dlg.open) { const y = dlg.scrollTop; dlg.innerHTML = sourcesLayer(); dlg.scrollTop = y; } };
+
+function sourcesLayer() {
+  const tab = SRC.tab, live = ['tfl', 'caltrans', 'stream'].includes(tab);
+  return `<header class="ev-top"><p class="kicker">${live ? 'Add live cameras' : 'Import an archive'}</p><button class="txt" data-act="close">Close · Esc</button></header>
+    <div class="tabs" role="tablist">${TABS.filter(([k]) => ['tfl', 'caltrans', 'stream'].includes(k) === live).map(([k, l]) => `<button role="tab" aria-selected="${tab === k}" data-act="src-tab" data-tab="${k}">${l}</button>`).join('')}</div>
+    <div class="srcbody">${{ tfl: pickCams, caltrans: pickCams, stream: streamForm, meva: mevaBrowser, urls: urlsForm }[tab]()}</div>`;
+}
+
+const intervalPick = () => `<label class="mono">Capture every <select data-src-interval>${[2, 5, 10, 15, 30, 60].map(m => `<option value="${m}" ${SRC.interval === m ? 'selected' : ''}>${m} min</option>`).join('')}</select></label>`;
+function pickCams() {
+  const tfl = SRC.tab === 'tfl', q = SRC.q.toLowerCase(), have = new Set((S.ingest?.feeds || []).map(f => f.url));
+  const shown = SRC.list.filter(c => !q || `${c.name} ${c.view}`.toLowerCase().includes(q)).slice(0, 60);
+  const perHour = SRC.sel.size * 60 / SRC.interval * (tfl ? 10 : SRC.clipSec);   // seconds of footage per hour
+  return `<p class="dim">${tfl ? 'Transport for London JamCams: each camera publishes a 10-second clip that is replaced every few minutes. Only new clips are captured.'
+      : 'Caltrans highway cameras stream live. Each capture records a short clip.'} Captures run while Video Intelligence is open.</p>
+    <div class="src-controls">
+      ${tfl ? '' : `<label class="mono">District <select data-src-district>${Object.entries({ 1: 'Eureka', 2: 'Redding', 3: 'Sacramento', 4: 'Bay Area', 5: 'San Luis Obispo', 6: 'Fresno', 7: 'Los Angeles', 8: 'San Bernardino', 9: 'Bishop', 10: 'Stockton', 11: 'San Diego', 12: 'Orange County' }).map(([d, n]) => `<option value="${d}" ${+d === SRC.district ? 'selected' : ''}>${d} · ${n}</option>`).join('')}</select></label>`}
+      <input type="search" data-src-q value="${esc(SRC.q)}" placeholder="Search ${SRC.list.length || ''} cameras by road or place" aria-label="Search cameras">
+    </div>
+    ${SRC.loading ? '<p class="mono dim">Loading the camera list…</p>' : `<ol class="cam-grid">${shown.map(c => `<li><label class="cam-pick ${have.has(c.url) ? 'have' : ''}">
+      <input type="checkbox" data-pick-cam="${esc(c.id)}" ${SRC.sel.has(c.id) || have.has(c.url) ? 'checked' : ''} ${have.has(c.url) ? 'disabled' : ''}>
+      ${c.image ? `<img loading="lazy" src="${esc(c.image)}" alt="">` : '<span class="noimg"></span>'}
+      <span class="cn">${esc(c.name)}</span><span class="mono dim">${esc(c.view || '')}${have.has(c.url) ? ' · added' : c.available === false ? ' · offline now' : ''}</span></label></li>`).join('')}</ol>
+      ${SRC.list.length > shown.length ? `<p class="mono dim">Showing ${shown.length} of ${SRC.list.filter(c => !q || `${c.name} ${c.view}`.toLowerCase().includes(q)).length}. Search to narrow down.</p>` : ''}`}
+    <div class="src-foot">
+      ${intervalPick()}${tfl ? '' : `<label class="mono">Clip length <select data-src-clip>${[15, 30, 60, 120].map(s => `<option value="${s}" ${SRC.clipSec === s ? 'selected' : ''}>${s} s</option>`).join('')}</select></label>`}
+      <button class="btn primary" data-act="src-add-cams" ${SRC.sel.size ? '' : 'disabled'}>Add ${SRC.sel.size || ''} camera${SRC.sel.size === 1 ? '' : 's'}</button>
+      ${SRC.sel.size ? `<span class="dim">About ${hmsDur(perHour)} of footage an hour${estimate(perHour) ? `, which takes about ${estimate(perHour)} to index` : ''}.</span>` : ''}
+    </div>
+    <p class="attrib">${tfl ? 'Powered by TfL Open Data. Contains OS data © Crown copyright and database rights.' : 'Caltrans CCTV, California Department of Transportation.'}</p>`;
+}
+function streamForm() {
+  return `<form class="reg" data-form="stream"><p class="dim">Any camera that publishes an HLS (.m3u8) or RTSP stream, or a short MP4 it keeps replacing. Each capture records one clip.</p>
+    <label class="fld">Stream or clip URL<input name="url" required placeholder="https://…/playlist.m3u8 or rtsp://…" pattern="(https?|rtsp)://.+"></label>
+    <label class="fld">Camera name<input name="name" required maxlength="80"></label>
+    <label class="fld">Location<input name="location" maxlength="120"></label>
+    <label class="fld">Timezone<input name="tz" list="tzs" value="${esc(Intl.DateTimeFormat().resolvedOptions().timeZone)}" required><datalist id="tzs">${TZS.map(t => `<option value="${t}">`).join('')}</datalist></label>
+    <div class="src-foot">${intervalPick()}<label class="mono">Clip length <select name="clipSec">${[15, 30, 60, 120].map(s => `<option ${s === 30 ? 'selected' : ''}>${s}</option>`).join('')}</select> s</label>
+      <button class="btn primary">Add camera</button></div></form>`;
+}
+function mevaBrowser() {
+  const m = SRC.meva, files = m?.files || [], sel = files.filter(f => SRC.mevaSel.has(f.key));
+  const secs = f => { const [a, b] = [f.start, f.end].map(t => t.split(':').reduce((h, x) => h * 60 + +x, 0)); return Math.max(1, b - a); };
+  const parts = SRC.mevaPrefix.split('/').filter(Boolean);
+  return `<p class="dim">MEVA: about 330 hours of real multi-camera footage from one site (29 cameras, people and vehicles), in short clips. Pick a day and an hour, then clips.</p>
+    <nav class="crumbs mono" aria-label="Folder">${parts.map((p, i) => `<button class="txt" data-act="meva-go" data-prefix="${esc(parts.slice(0, i + 1).join('/') + '/')}">${esc(p)}</button>`).join(' / ')}</nav>
+    ${SRC.loading ? '<p class="mono dim">Listing…</p>' : `
+    ${m?.dirs.length ? `<ol class="meva-dirs">${m.dirs.map(d => `<li><button class="btn" data-act="meva-go" data-prefix="${esc(d)}">${esc(d.split('/').filter(Boolean).pop())}</button></li>`).join('')}</ol>` : ''}
+    ${files.length ? `<table class="events meva"><thead><tr><th scope="col"><input type="checkbox" data-meva-all ${sel.length === files.length ? 'checked' : ''} aria-label="Select all"></th><th scope="col">Camera</th><th scope="col">Site</th><th scope="col">Time</th><th scope="col">Size</th></tr></thead>
+      <tbody>${files.map(f => `<tr><td><input type="checkbox" data-meva="${esc(f.key)}" ${SRC.mevaSel.has(f.key) ? 'checked' : ''} aria-label="${esc(f.camera)} ${f.start}"></td>
+        <td class="mono">${esc(f.camera)}</td><td>${esc(f.site)}</td><td class="mono">${f.date} ${f.start}–${f.end}</td><td class="mono">${mb(f.size)}</td></tr>`).join('')}</tbody></table>` : ''}`}
+    <div class="src-foot"><button class="btn primary" data-act="meva-import" ${sel.length ? '' : 'disabled'}>Import ${sel.length || ''} clip${sel.length === 1 ? '' : 's'}${sel.length ? ` · ${mb(sel.reduce((n, f) => n + f.size, 0))}` : ''}</button>
+      ${sel.length ? `<span class="dim">${hmsDur(sel.reduce((n, f) => n + secs(f), 0))} of footage${estimate(sel.reduce((n, f) => n + secs(f), 0)) ? `, about ${estimate(sel.reduce((n, f) => n + secs(f), 0))} to index` : ''}. Clips of one camera become one camera.</span>` : ''}</div>
+    <p class="attrib">MEVA dataset, Kitware / IARPA, CC BY 4.0. Muscatatuck Urban Training Center, Indiana.</p>`;
+}
+function urlsForm() {
+  return `<form class="reg" data-form="urls"><p class="dim">Direct links to video files, one per line (for example a public dataset). Each file is downloaded and indexed here.</p>
+    <label class="fld">Video URLs<textarea name="urls" rows="6" required placeholder="https://…/camera1.mp4"></textarea></label>
+    <label class="fld">Camera name<input name="camera" maxlength="80" placeholder="Optional: put every file on one camera"></label>
+    <label class="fld">Location<input name="location" maxlength="120"></label>
+    <label class="fld">Timezone<input name="tz" list="tzs" value="${esc(Intl.DateTimeFormat().resolvedOptions().timeZone)}" required><datalist id="tzs">${TZS.map(t => `<option value="${t}">`).join('')}</datalist></label>
+    <label class="fld">Recording started<input type="datetime-local" name="start" value="${localNow()}" step="1" required></label>
+    <div class="src-foot"><button class="btn primary">Import</button></div></form>`;
+}
+
+async function addPickedCams() {
+  const tfl = SRC.tab === 'tfl', tz = tfl ? 'Europe/London' : 'America/Los_Angeles';
+  const items = SRC.list.filter(c => SRC.sel.has(c.id)).map(c => ({ name: c.name, location: tfl ? `${c.view ? c.view + ' · ' : ''}London` : `${c.view ? c.view + ' · ' : ''}California`, tz,
+    url: c.url, kind: tfl ? 'clip' : 'stream', intervalMin: SRC.interval, clipSec: SRC.clipSec, provider: SRC.tab, image: c.image }));
+  try { S.ingest = await api.addFeeds(items); toast(`${S.ingest.added} camera${S.ingest.added === 1 ? '' : 's'} added · first captures start now`); dlg.close(); go('cameras'); pollVideos(); }
+  catch (e) { toast(e.message); }
+}
+async function submitStream(form) {
+  const fd = new FormData(form), url = fd.get('url').trim();
+  try {
+    S.ingest = await api.addFeeds([{ name: fd.get('name').trim(), location: fd.get('location').trim(), tz: fd.get('tz').trim(), url, kind: /\.m3u8|^rtsp:/i.test(url) ? 'stream' : 'clip',
+      intervalMin: SRC.interval, clipSec: +fd.get('clipSec'), provider: 'url' }]);
+    toast('Camera added'); dlg.close(); go('cameras'); pollVideos();
+  } catch (e) { toast(e.message); }
+}
+async function importMeva() {
+  try { S.ingest = await api.addImports({ meva: SRC.meva.files.filter(f => SRC.mevaSel.has(f.key)).map(f => ({ key: f.key, size: f.size })) }); toast('Import started'); dlg.close(); go('cameras'); pollVideos(); }
+  catch (e) { toast(e.message); }
+}
+async function submitUrls(form) {
+  const fd = new FormData(form), urls = fd.get('urls').split(/\s+/).filter(Boolean);
+  try {
+    S.ingest = await api.addImports({ urls, camera: fd.get('camera').trim() || undefined, location: fd.get('location').trim() || undefined, tz: fd.get('tz').trim(), start: new Date(fd.get('start')).toISOString() });
+    toast(`${urls.length} file${urls.length === 1 ? '' : 's'} queued for import`); dlg.close(); go('cameras'); pollVideos();
+  } catch (e) { toast(e.message); }
+}
+
+// Cameras page: live cameras, imports and the indexing backlog, above the recordings (grouped per camera).
+const FEED_KIND = { tfl: 'TfL JamCam · 10 s clips', caltrans: 'Caltrans live stream', url: 'Stream' };
+function ingestPanel() {
+  const ig = S.ingest; if (!ig) return '';
+  const b = ig.backlog, active = ig.imports.filter(i => ['queued', 'downloading'].includes(i.state)), failed = ig.imports.filter(i => i.state === 'failed');
+  return `${b.clips ? `<p class="backlog"><b>Indexing backlog</b> · ${b.clips} clip${b.clips === 1 ? '' : 's'} · ${hmsDur(b.seconds)} of footage${b.eta ? ` · up to ${hmsDur(b.eta)} at ${b.secPerFrame.toFixed(1)} s a frame (measured)` : ''}${b.clips >= ig.maxBacklog ? ' · live captures pause until it clears' : ''}</p>` : ''}
+    ${ig.feeds.length ? `<section class="feeds"><p class="eyebrow">LIVE CAMERAS · capturing while the app is open</p><ol>${ig.feeds.map(f => `<li class="feed ${f.active ? '' : 'paused'}">
+      ${f.image ? `<img loading="lazy" src="${esc(f.image)}" alt="">` : '<span class="noimg"></span>'}
+      <div><p class="cn">${esc(f.name)}</p><p class="mono dim">${esc(FEED_KIND[f.provider] || 'Stream')} · every ${f.intervalMin} min · ${f.captures} capture${f.captures === 1 ? '' : 's'}</p>
+        <p class="mono ${f.lastError ? 'warn' : 'dim'}">${f.active ? esc(f.state) : 'Paused'}${f.last ? ` · last ${new Date(f.last).toLocaleTimeString('en-GB')}` : ''}${f.lastError ? ` · ${esc(f.lastError)}` : ''}</p></div>
+      <div class="acts"><button class="txt" data-act="feed-toggle" data-id="${f.id}" data-on="${f.active ? 0 : 1}">${f.active ? 'Pause' : 'Resume'}</button><button class="txt danger" data-act="feed-del" data-id="${f.id}">Remove</button></div></li>`).join('')}</ol>
+      <p class="attrib">${[...new Set(ig.feeds.map(f => ig.attribution[f.provider]).filter(Boolean))].join(' ')}</p></section>` : ''}
+    ${active.length || failed.length ? `<section class="imports"><p class="eyebrow">IMPORTS</p><ol>${[...active, ...failed].slice(0, 12).map(i => `<li><span>${esc(i.name)} <span class="mono dim">${esc(i.url.split('/').pop())}</span></span>
+      <span class="mono ${i.state === 'failed' ? 'warn' : 'dim'}">${i.state === 'failed' ? esc(i.error) : i.state === 'downloading' ? `${mb(i.done)} / ${mb(i.total || 0)}` : 'queued'}</span></li>`).join('')}</ol>
+      ${active.length > 12 ? `<p class="mono dim">and ${active.length - 12} more queued</p>` : ''}${failed.length ? '<button class="txt" data-act="imports-clear">Clear finished</button>' : ''}</section>` : ''}`;
 }
 
 // Playback of a recording, with the indexed tracks drawn over it (or the original picture alone).
 const V = { evs: [], det: true, gap: 2 };
 function videoLayer({ id, t = 0, det = true }) {
   const c = cam(id) ?? S.videos.find(v => v.id === id), sv = S.videos.find(v => v.id === id);
-  V.evs = allEvents.filter(e => e.cameraId === id && e.dets?.length);
+  V.evs = allEvents.filter(e => (e.vid ?? e.cameraId) === id && e.dets?.length);   // this clip's tracks
   V.det = det && V.evs.length > 0; V.gap = 1 / (sv?.sampling || 0.5);
   const seg = ([m, l]) => `<button data-act="vmode" data-m="${m}" aria-pressed="${(m === 'det') === V.det}" ${m === 'det' && !V.evs.length ? 'disabled title="Not indexed yet"' : ''}>${l}</button>`;
   cancelAnimationFrame(V.raf); V.raf = requestAnimationFrame(drawBoxes);
@@ -877,7 +1029,8 @@ function boxAt(ds, t) {
 function drawBoxes() {
   const v = $('#vplay'), box = $('#vbox');
   if (!v || !box || !dlg.open) return;
-  box.innerHTML = !V.det ? '' : V.evs.map(e => { const b = boxAt(e.dets, v.currentTime); return b ? `<div class="vb ${e.entity}" style="left:${b[0] / 6.4}%;top:${b[1] / 3.6}%;width:${b[2] / 6.4}%;height:${b[3] / 3.6}%"><span>${tid(e.track)} · ${esc(e.label)}</span></div>` : ''; }).join('');
+  // dets are in camera time; a live/archive camera's clip starts e.t - e.vt seconds into it
+  box.innerHTML = !V.det ? '' : V.evs.map(e => { const b = boxAt(e.dets, v.currentTime + (e.vt != null ? e.t - e.vt : 0)); return b ? `<div class="vb ${e.entity}" style="left:${b[0] / 6.4}%;top:${b[1] / 3.6}%;width:${b[2] / 6.4}%;height:${b[3] / 3.6}%"><span>${tid(e.track)} · ${esc(e.label)}</span></div>` : ''; }).join('');
   V.raf = requestAnimationFrame(drawBoxes);
 }
 
@@ -885,6 +1038,14 @@ async function loadDataset() {
   const d = await api.getDataset();
   api.useDataset(d);
   cams = d.cameras; allEvents = d.events;
+}
+
+// Your footage is searched one day at a time (an archive and today's live captures do not share a time axis).
+async function switchDay(day) {
+  S.settings = await api.setSettings({ day });
+  await loadDataset();
+  Object.assign(S, { phase: 'idle', res: null, interp: null, stages: [], context: null, scope: 'all', zoom: 0 });
+  render(); toast(`Showing footage from ${new Date(day + 'T12:00Z').toLocaleDateString('en-GB', { dateStyle: 'medium' })}`);
 }
 
 async function switchSource(src) {
@@ -1232,6 +1393,20 @@ const ACT = {
   nudge: d => { const x = S.saved.find(i => i.id === d.id), lane = S.saved.filter(i => i.lane === x.lane); moveCard(d.id, x.lane, lane.indexOf(x) + +d.d); },
   'compare-picked': () => openLayer({ kind: 'compare', ids: [...picked] }),
   register: async () => { S.setup = await api.getSetup(); openLayer({ kind: 'register' }); },
+  'src-open': d => openSources(d.tab),
+  'src-tab': d => { SRC.tab = d.tab; SRC.q = ''; SRC.sel.clear(); drawSources(); loadSourceList(); },
+  'src-add-cams': () => addPickedCams(),
+  'meva-go': d => { SRC.mevaPrefix = d.prefix; loadSourceList(); },
+  'meva-import': () => importMeva(),
+  'feed-toggle': async d => { S.ingest = await api.updateFeed(d.id, { active: d.on === '1' }); render(); pollVideos(); },
+  'feed-del': async d => { if (!confirm('Stop capturing this camera? Clips already indexed stay.')) return; S.ingest = await api.removeFeed(d.id); render(); },
+  'imports-clear': async () => { S.ingest = await api.clearImports(); render(); },
+  'camera-del': async d => {
+    const vs = S.videos.filter(v => v.cameraKey === d.key);
+    if (!confirm(`Remove “${vs[0].name}” and its ${vs.length} clips? Their frames and index are deleted.`)) return;
+    for (const v of vs) await api.deleteVideo(v.id);
+    S.videos = await api.getVideos(); await loadDataset(); render();
+  },
   source: d => switchSource(d.src),
   'play-orig': d => openLayer({ kind: 'video', id: d.id, t: +d.t, det: d.det !== '0' }),
   vmode: (d, b) => { V.det = d.m === 'det'; $$('[data-act=vmode]').forEach(x => x.setAttribute('aria-pressed', x === b)); },
@@ -1288,6 +1463,8 @@ document.addEventListener('submit', e => {
   if (e.target.dataset.form === 'settings') { e.preventDefault(); return saveSettings(e.target); }
   if (e.target.dataset.form === 'watch') { e.preventDefault(); return saveWatch(e.target); }
   if (e.target.dataset.form === 'register') { e.preventDefault(); return uploadFootage(e.target); }
+  if (e.target.dataset.form === 'stream') { e.preventDefault(); return submitStream(e.target); }
+  if (e.target.dataset.form === 'urls') { e.preventDefault(); return submitUrls(e.target); }
   if (e.target.dataset.form !== 'search') return;
   e.preventDefault();
   const fd = new FormData(e.target);
@@ -1297,6 +1474,7 @@ document.addEventListener('submit', e => {
 document.addEventListener('input', e => {
   const t = e.target;
   if (t.id === 'q') S.query = t.value;
+  else if (t.dataset.srcQ !== undefined) { SRC.q = t.value; const at = t.selectionStart; drawSources(); const n = dlg.querySelector('[data-src-q]'); n?.focus(); n?.setSelectionRange(at, at); }
   else if (t.id === 'notes') { clearTimeout(notesTimer); S.notes = t.value; notesTimer = setTimeout(() => api.setNotes(S.notes), 400); }
   else if (t.id === 'scrub') { stopPlay(); P.off = +t.value; drawFrame(); }
   else if (t.id === 'pal-q') palFilter();
@@ -1306,6 +1484,13 @@ document.addEventListener('change', e => {
   const t = e.target;
   if (t.id === 'speed') P.speed = +t.value;
   else if (t.id === 'live-speed') S.live.speed = +t.value;
+  else if (t.dataset.day !== undefined) switchDay(t.value);
+  else if (t.dataset.pickCam) { t.checked ? SRC.sel.set(t.dataset.pickCam, 1) : SRC.sel.delete(t.dataset.pickCam); drawSources(); }
+  else if (t.dataset.srcInterval !== undefined) { SRC.interval = +t.value; drawSources(); }
+  else if (t.dataset.srcClip !== undefined) { SRC.clipSec = +t.value; drawSources(); }
+  else if (t.dataset.srcDistrict !== undefined) { SRC.district = +t.value; SRC.sel.clear(); loadSourceList(); }
+  else if (t.dataset.meva) { t.checked ? SRC.mevaSel.add(t.dataset.meva) : SRC.mevaSel.delete(t.dataset.meva); drawSources(); }
+  else if (t.dataset.mevaAll !== undefined) { SRC.mevaSel = new Set(t.checked ? SRC.meva.files.map(f => f.key) : []); drawSources(); }
   else if (t.dataset.move) moveCard(t.dataset.move, t.value, 999);
   else if (t.dataset.pick) { t.checked ? picked.add(t.dataset.pick) : picked.delete(t.dataset.pick); render(); $(`[data-pick="${t.dataset.pick}"]`)?.focus(); }
   else if (t.dataset.tog) { P[t.dataset.tog] = t.checked; drawFrame(); }
@@ -1408,7 +1593,7 @@ try {
   await loadDataset();
   [S.memory, S.history, S.saved, S.notes, S.settings, S.audit, S.watches, S.alerts] = await Promise.all([
     api.getMemory(), api.getHistory(), api.getSaved(), api.getNotes(), api.getSettings(), api.getAudit(), api.getWatches(), api.getAlerts()]);
-  if (mode === 'server') { S.videos = await api.getVideos(); if (S.videos.some(v => v.status !== 'ready' && v.status !== 'failed')) pollVideos(); }
+  if (mode === 'server') { [S.videos, S.ingest] = await Promise.all([api.getVideos(), api.getIngest()]); if (S.ingest.feeds.some(f => f.active)) pollVideos(); if (S.videos.some(v => v.status !== 'ready' && v.status !== 'failed')) pollVideos(); }
 } catch (e) {
   $('#app').innerHTML = `<main class="boot-fail"><p class="eyebrow">Could not start</p><h1 class="claim">The local server did not answer as expected.</h1>
     <p class="dim">${esc(e.message)}</p><p>Close this window and open <b>Video Intelligence.exe</b> again; it restarts an outdated server.</p></main>`;

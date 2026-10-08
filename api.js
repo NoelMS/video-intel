@@ -100,7 +100,7 @@ export const DEPTHS = {
 };
 export const DEFAULT_SETTINGS = {
   depth: 'balanced',
-  source: 'demo',                                         // 'demo' (synthetic) or 'mine' (indexed recordings)
+  source: 'demo', day: null,                              // day: which day of your footage to search (null = latest)                                         // 'demo' (synthetic) or 'mine' (indexed recordings)
   pipeline: { sampling: 0.5, refinement: 4 },             // frames per second sampled from recordings
   privacy: { faces: true, plates: true, onPrem: true, retentionDays: 30, expiryDays: 90, exports: 'watermarked' },
   operator: { role: 'analyst' },
@@ -110,11 +110,11 @@ export const ROLES = ['viewer', 'analyst', 'supervisor'];
 export const EXPORTS = { allowed: 'Allowed', watermarked: 'Watermarked', disabled: 'Disabled' };
 export async function getSettings() {
   const s = load('vi.settings', {});
-  return Object.fromEntries(Object.entries(DEFAULT_SETTINGS).map(([k, v]) => [k, typeof v === 'object' ? { ...v, ...s[k] } : s[k] ?? v]));
+  return Object.fromEntries(Object.entries(DEFAULT_SETTINGS).map(([k, v]) => [k, v && typeof v === 'object' ? { ...v, ...s[k] } : s[k] ?? v]));
 }
 export async function setSettings(patch) {
   const cur = await getSettings();
-  const next = Object.fromEntries(Object.entries(cur).map(([k, v]) => [k, typeof v === 'object' ? { ...v, ...patch[k] } : patch[k] ?? v]));
+  const next = Object.fromEntries(Object.entries(cur).map(([k, v]) => [k, v && typeof v === 'object' ? { ...v, ...patch[k] } : k in patch ? patch[k] : v]));
   save('vi.settings', next);
   return next;
 }

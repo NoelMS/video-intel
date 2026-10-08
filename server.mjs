@@ -4,9 +4,11 @@ import { createServer } from 'node:http';
 import { readFileSync, writeFileSync, existsSync, mkdirSync, createReadStream, statSync } from 'node:fs';
 import { join, normalize, dirname, extname, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
 import * as api from './api.js';
 import * as setup from './setup.mjs';
 import * as indexer from './indexer.mjs';
+import * as sources from './sources.mjs';
 import * as DEMO from './data.js';
 
 const root = dirname(fileURLToPath(import.meta.url));
@@ -65,6 +67,7 @@ function validSettings(b) {
   }
   if (b.operator != null) { if (!api.ROLES.includes(b.operator.role)) bad('role must be viewer, analyst or supervisor'); out.operator = { role: b.operator.role }; }
   if (b.source != null) { if (!['demo', 'mine'].includes(b.source)) bad('source must be demo or mine'); out.source = b.source; }
+  if ('day' in b) { if (b.day !== null && !/^\d{4}-\d\d-\d\d$/.test(b.day)) bad('day must be YYYY-MM-DD'); out.day = b.day; }
   if (b.vision != null) {
     out.vision = {};
     if ('model' in b.vision) out.vision.model = validModel(b.vision.model);
@@ -119,14 +122,52 @@ async function migrateModel() {
   if (m) await api.setSettings({ vision: { model: `qwen3-vl:${m[1]}-instruct`, setupSeen: false } });
 }
 
+// Live feeds and archive imports (sources.mjs). Directory cameras arrive with their public URLs; any URL is limited to
+// http(s)/rtsp and the import extension allow-list, and MEVA keys must match the archive's own file naming.
+const validTz = tz => { try { new Intl.DateTimeFormat('en', { timeZone: tz }); return tz; } catch { bad('unknown timezone'); } };
+function validFeeds(b) {
+  if (!Array.isArray(b.items) || !b.items.length || b.items.length > 100) bad('items must be 1-100 cameras');
+  return b.items.map(i => {
+    if (!/^(https?|rtsp):\/\/\S+$/.test(i.url || '') || i.url.length > 500) bad('url must be http(s) or rtsp');
+    if (!['clip', 'stream'].includes(i.kind)) bad('kind must be clip or stream');
+    const intervalMin = +i.intervalMin, clipSec = +(i.clipSec ?? 30);
+    if (!(intervalMin >= 2 && intervalMin <= 1440)) bad('intervalMin must be 2-1440');
+    if (!(clipSec >= 5 && clipSec <= 300)) bad('clipSec must be 5-300');
+    return { name: str(i.name, 80, 'name'), location: str(i.location || 'Unspecified', 120, 'location'), tz: validTz(i.tz), url: i.url, kind: i.kind,
+      intervalMin, clipSec, provider: ['tfl', 'caltrans', 'url'].includes(i.provider) ? i.provider : 'url', image: /^https:\/\/\S+$/.test(i.image || '') ? i.image : null };
+  });
+}
+function validImports(b) {
+  if (Array.isArray(b.meva)) {
+    if (!b.meva.length || b.meva.length > 500) bad('choose 1-500 MEVA clips');
+    return sources.mevaItems(b.meva.map(f => {
+      if (!/^drops-[\w-]+\/[\w./-]+\.r\d+\.avi$/.test(f.key || '') || f.key.includes('..')) bad('not a MEVA clip');
+      const m = f.key.match(/(\d{4}-\d\d-\d\d)\.(\d\d-\d\d-\d\d)\.(\d\d-\d\d-\d\d)\.([\w-]+)\.([\w-]+)\.r\d+\.avi$/);
+      if (!m) bad('not a MEVA clip');
+      return { key: f.key, size: Number.isFinite(f.size) ? f.size : 0, date: m[1], start: m[2].replace(/-/g, ':'), end: m[3].replace(/-/g, ':'), site: m[4], camera: m[5] };
+    }));
+  }
+  if (!Array.isArray(b.urls) || !b.urls.length || b.urls.length > 200) bad('give 1-200 video URLs');
+  const tz = validTz(b.tz), start = iso(b.start, 'start');
+  return b.urls.map(u => {
+    if (!/^https?:\/\/\S+$/.test(u) || u.length > 500) bad(`not an http(s) URL: ${String(u).slice(0, 80)}`);
+    const name = decodeURIComponent(new URL(u).pathname.split('/').pop() || 'video'), ext = (name.match(/\.[a-z0-9]{1,5}$/i)?.[0] || '').toLowerCase();
+    if (!VIDEO_EXT.includes(ext)) bad(`Unsupported file type ${ext || '(none)'} in ${name}`);
+    const cam = b.camera ? str(b.camera, 80, 'camera') : name.replace(/\.[^.]+$/, '').slice(0, 80);
+    return { url: u, name: cam, location: b.location ? str(b.location, 120, 'location') : 'Imported', tz, start, ext, provider: 'url',
+      cameraKey: 'url-' + createHash('sha1').update(b.camera ? cam : u).digest('hex').slice(0, 12) };
+  });
+}
+const ingest = () => ({ feeds: sources.listFeeds(), imports: sources.listImports(), backlog: indexer.backlog(), maxBacklog: sources.MAX_BACKLOG, attribution: sources.ATTRIBUTION });
+
 // The active dataset follows settings.source: the demo, or "My footage" rebuilt whenever indexed videos change.
 let mine = null, mineKey = null;
 async function applySource() {
-  const { source, vision, pipeline } = await api.getSettings();
+  const { source, vision, pipeline, day } = await api.getSettings();
   indexer.configure({ model: vision.model, sampling: pipeline.sampling });
   if (source !== 'mine') return api.useDataset(DEMO);
-  const key = indexer.listVideos().filter(v => v.status === 'ready').map(v => v.id + v.indexedAt).join();
-  if (key !== mineKey) { mine = indexer.dataset(); mineKey = key; }
+  const key = day + indexer.listVideos().filter(v => v.status === 'ready').map(v => v.id + v.indexedAt).join();
+  if (key !== mineKey) { mine = indexer.dataset(day); mineKey = key; }
   api.useDataset(mine);
 }
 
@@ -195,6 +236,24 @@ const routes = [
     return api.addAudit({ action: 'reveal', eventId: b.eventId, role: (await api.getSettings()).operator.role }); // api enforces the role (403)
   }],
   ['GET', /^dataset$/, () => api.ds()],
+  ['GET', /^sources\/tfl$/, () => sources.tfl()],
+  ['GET', /^sources\/caltrans\/(\d{1,2})$/, (_, [d]) => { if (!sources.DISTRICTS[d]) bad('district must be 1-12'); return sources.caltrans(+d); }],
+  ['GET', /^sources\/meva$/, (_, __, url) => {
+    const p = url.searchParams.get('prefix') || 'drops-123-r13/';
+    if (!/^drops-[\w./-]*$/.test(p) || p.includes('..')) bad('not a MEVA folder');
+    return sources.meva(p);
+  }],
+  ['GET', /^ingest$/, () => ingest()],
+  ['POST', /^feeds$/, async req => ({ added: sources.addFeeds(validFeeds(await body(req))).length, ...ingest() })],
+  ['PUT', /^feeds\/([\w-]+)$/, async (req, [id]) => {
+    const b = await body(req), patch = {};
+    if ('active' in b) { if (typeof b.active !== 'boolean') bad('active must be boolean'); patch.active = b.active; patch.state = b.active ? 'Resumed' : 'Paused'; }
+    if ('intervalMin' in b) { if (!(+b.intervalMin >= 2 && +b.intervalMin <= 1440)) bad('intervalMin must be 2-1440'); patch.intervalMin = +b.intervalMin; }
+    sources.updateFeed(id, patch); return ingest();
+  }],
+  ['DELETE', /^feeds\/([\w-]+)$/, (_, [id]) => { sources.removeFeed(id); return ingest(); }],
+  ['POST', /^imports$/, async req => { sources.addImports(validImports(await body(req))); return ingest(); }],
+  ['DELETE', /^imports$/, () => { sources.clearImports(); return ingest(); }],
   ['GET', /^videos$/, () => indexer.listVideos()],
   ['POST', /^videos$/, (req, _, url) => indexer.addVideo(req, validUpload(url.searchParams, (req.headers['content-type'] || '').split(';')[0].trim()))],
   ['POST', /^videos\/([\w-]+)\/reindex$/, (_, [id]) => { indexer.reindex(id); return { ok: true }; }],
@@ -250,11 +309,13 @@ function guard(req) {
   if (req.method === 'POST' && SIMPLE.includes((req.headers['content-type'] || '').split(';')[0].trim().toLowerCase())) throw new HttpError(415, 'Send JSON (or video) with a content-type');
 }
 
-export const activity = { busy: () => !!setup.busy() || indexer.busy() }; // idle exit waits for installs and indexing
+export const activity = { busy: () => !!setup.busy() || indexer.busy() || sources.busy() }; // idle exit waits for installs and indexing
 
 export function start(port = 0, storeFile = join(root, '.store', 'store.json'), host = '127.0.0.1') {
   api.useStorage(fileStore(storeFile));
   indexer.useStorage(api.kv.load, api.kv.save);
+  sources.useStorage(api.kv.load, api.kv.save);
+  sources.startScheduler();
   indexer.useStoreDir(dirname(storeFile));
   migrateModel().then(applySource).then(indexer.resume);   // continue any indexing interrupted by a restart
   const server = createServer(async (req, res) => {

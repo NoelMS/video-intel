@@ -60,7 +60,7 @@ ES modules need an http origin, so opening `index.html` from disk does not work.
 | [WILDTRACK](https://www.epfl.ch/labs/cvlab/data/data-wildtrack/) | 7 overlapping HD cameras, pedestrians, calibrated | Free download |
 | CamNeT | 5-8 non-overlapping campus cameras with trajectories | Research dataset |
 
-Details and caveats are in [HANDOFF.md](HANDOFF.md#footage-sources-researched).
+TfL, Caltrans, any HLS/RTSP/MP4 stream URL, MEVA and plain video-URL lists are built in: **Cameras → Add live cameras / Import an archive**. Live cameras are captured as short clips on an interval while the app is open; each camera's clips are searched as one camera, one day at a time (pick the day in the header). Details and caveats are in [HANDOFF.md](HANDOFF.md#footage-sources-researched).
 
 ## Two data sources
 
@@ -106,7 +106,8 @@ Detailed diagrams (modules, runtime modes, search pipeline, re-ID, alerts, UI, d
 - **Sparse sampling.** At 0.5 fps one person can split into several tracks.
 - **Cross-camera links are description-based** and always shown as *possible*.
 - **No baseline comparison or ablation yet.**
-- **Live mode replays indexed footage**; there is no RTSP ingest.
+- **Live mode replays indexed footage.** Live cameras are captured as periodic clips, not a continuous stream, and only while the app is open.
+- **Indexing is slower than real time** on a small GPU (~10 s a frame at 0.5 fps on a 4 GB card). Capture pauses while 12 clips wait; big archives take hours.
 - **Masking depends on the model** reporting faces and plates, which it often misses for distant CCTV figures.
 - **No authentication**: the operator role is a setting.
 

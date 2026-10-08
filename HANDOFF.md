@@ -44,7 +44,9 @@ ES modules need an http origin. Opening `index.html` from disk will not work.
 | `sw.js`, `offline.html` | The service worker's only job: when a navigation fails (server down, e.g. app opened from its installed icon) it serves `offline.html`, which fires `video-intel://start` (automatically, plus a button for when the browser wants a click), polls `/api/health`, and reloads into the app. It never caches the app or the API. Bump the cache name (now `vi-offline-v3`) when `offline.html` changes |
 | `package.json` | `type: module`, `start`/`check` scripts. No dependencies |
 | `app.js` | UI: one state object `S`, string-template views, delegated `data-act` actions. `loadDataset`/`switchSource`; first-launch setup prompt (`setupLayer`); upload with progress (`uploadFootage`, XHR); indexing status polling (`videosList`/`pollVideos`) |
-| `check.mjs` | Flow assertions (node) |
+| `check.mjs` | Flow assertions (node), offline |
+| `sources.mjs` | Public footage, all free and keyless. **Directories**: `tfl()` (TfL JamCams, ~890, 10 s MP4 each, replaced every few minutes), `caltrans(d)` (Caltrans district 1-12, live HLS, in-service cameras only), `meva(prefix)` (unsigned S3 ListObjectsV2 on `mevadata-public-01`; filenames give date, local start/end, site and camera; `localToUtc` converts with `America/Indiana/Indianapolis`). **Feeds** (`vi.feeds`): `kind: 'clip'` refetches with `If-Modified-Since` (a 304 means no new clip, nothing is stored); `kind: 'stream'` records `clipSec` with `ffmpeg -c copy` (RTSP over TCP, HTTP read timeout 20 s, hard kill at clip + 90 s). The scheduler ticks every 15 s, captures only while the server runs (it does not keep the server alive), and skips captures while `indexer.backlog().clips >= MAX_BACKLOG` (12). **Imports** (in memory): sequential `setup.download` (resumable), then `indexer.addVideoFile`. A camera is a stable `cameraKey` (`feed-<sha1(url)>`, `meva-<camera>`, `url-<sha1>`) |
+| `check-live.mjs` | Needs the internet and ffmpeg: real TfL clip, two real Caltrans HLS captures (one camera, two clips), a real MEVA import, and validation, all with a stand-in vision model. Run it after touching `sources.mjs` |
 
 ## Architecture rules
 
@@ -130,6 +132,18 @@ ES modules need an http origin. Opening `index.html` from disk will not work.
   - **Thinking-model migration**: Ollama auto-updated to 0.40.1 mid-test (the tray app runs `OllamaSetup.exe` itself), after which plain `qwen3-vl:2b` reasoned through every reply. On start, `migrateModel()` moves saved `qwen3-vl:<n>b` to `-instruct` and clears `setupSeen`, so the prompt offers the download. A re-index with `qwen3-vl:2b-instruct` gave 366 detections and 0 skipped at ~13 s a frame on 0.40.1 (slower than the ~5 s measured on 0.31).
   - **Verified PR features in headless Chrome**: the DivX clip plays from its H.264 copy with 12 interpolated boxes at 0:03 and at 0:36, "Original" shows none, every page transition lands, zero console errors. Boxes trail walking people because detections are 2 s apart.
 
+- **Live public cameras and archive import** (`sources.mjs`):
+  - **Cameras page**: "Add live cameras" opens London (TfL picker, searchable, thumbnails), California (district picker) and Stream URL (any HLS/RTSP/MP4). "Import an archive" opens a MEVA browser (folder → day → hour → clips, with size, footage length and time-to-index estimate) and Video URLs (one per line, optionally all on one camera).
+  - **Above the recordings**: a backlog line (clips waiting, footage length, "up to" time at the measured s/frame), live cameras (state, last capture, pause/remove, licence attribution) and imports.
+  - **Clips group by camera**: `dataset()` merges all ready videos with one `cameraKey` into a single camera. Coverage = merged clip spans (gaps between captures show as coverage gaps). Frames carry `v` (clip id) and events carry `vid`/`vt` (clip id, clip time), so frame URLs, `verify()`, playback and downloads address the clip. `t` and `dets[].t` are camera time. The recordings list shows such a camera as one row (clips, indexed/waiting/failed, the clip being indexed now).
+  - **One day at a time**: the time axis is seconds from local midnight, so an archive from 2018 and captures from today cannot share it. It put London captures at hour 75350. `dataset(day)` now holds one day's footage, defaulting to the latest; `days` lists the rest; `settings.day` (null = latest) is picked in the header. `getSettings`/`setSettings` used to spread any `typeof 'object'`, `null` included; a scalar setting with a null default needs the `v && typeof v === 'object'` guard.
+  - **Times** of a recording display in the camera's own timezone, and the zone label uses the footage's date (EST vs EDT).
+  - **Measured speed**: each indexed video records `secPerFrame`, and `indexer.backlog()` averages the last 10 for the estimates. Recent runs measured ~10-11 s a frame on qwen3-vl:2b-instruct / RTX 3050 4 GB / Ollama 0.40.1.
+  - **Verified**: `check-live.mjs` passes. In the browser with the real model, the live captures and the MEVA clip were picked through the pickers, captured, indexed and searched:
+    - TfL "Tooley St/Abbots Lane": 2 captures, one camera, 50 detections.
+    - MEVA G339: 71 detections.
+    - "Find the white SUV" on the 2018 day: candidates confirmed by the model's visual check.
+
 ## Footage sources (researched)
 
 Live feeds (for the live-ingest stretch goal; all free, check each licence before redistributing):
@@ -157,7 +171,10 @@ For UI work use Playwright **outside the repo** so the project stays dependency-
 - Playback boxes are interpolated between sampled frames (every 2 s by default), so they lag fast motion. Privacy masks are not applied to playback, only to extracted frames.
 - Recordings indexed before the H.265 change have no playable copy; Re-index makes one.
 - Event times are seconds from the first recording's local midnight. Footage spanning several days shows hours past 24.
-- Live mode is a replay of indexed footage, not ingest.
+- Live mode is a replay of indexed footage. Real ingest is the live cameras on the Cameras page: periodic clips, not a continuous stream, and only while the app is open.
+- Throughput is the model: ~10 s a frame on a 4 GB GPU means about 5 s of compute per second of footage at 0.5 fps (less where `mpdecimate` drops static frames). "Vast" archives need a bigger GPU, a lower sampling rate, or patience; the backlog line says which.
+- The search covers one day of your footage at a time (header day picker).
+- Caltrans streams are often offline even when listed in service; a failed capture is shown on the feed and retried next interval.
 - No authentication: the operator role is a setting. A real deployment must bind roles to identities server-side (`addAudit` already enforces the role from settings).
 - Stage latencies include simulated delays (`DELAY` in `api.js`).
 - Query understanding is a keyword/regex interpreter (`interpret`). A real deployment swaps in an LLM or parser behind the same output shape.

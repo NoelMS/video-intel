@@ -1,7 +1,7 @@
 // Indexes your recordings: ffmpeg samples frames (dropping near-duplicates), a local Ollama vision model describes
 // each frame, detections are linked into tracks, tracks become events in the same shape as the demo data, and
 // tracks on different cameras that look alike are linked as possible journeys. All local.
-import { createWriteStream, existsSync, mkdirSync, readFileSync, writeFileSync, rmSync, readdirSync, statSync, renameSync } from 'node:fs';
+import { createWriteStream, existsSync, mkdirSync, readFileSync, writeFileSync, rmSync, readdirSync, statSync, renameSync, copyFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -42,13 +42,17 @@ export async function probe(file) {
 }
 
 // Stream an upload to disk, probe it, queue it. meta is validated by the server.
-export async function addVideo(req, meta) {
+export const addVideo = (req, meta) => ingest(meta, file => pipeline(req, createWriteStream(file)));
+// A file the server fetched itself (live capture, archive import): moved into the store, then queued.
+export const addVideoFile = (src, meta) => ingest(meta, file => { try { renameSync(src, file); } catch { copyFileSync(src, file); rmSync(src, { force: true }); } });
+
+async function ingest(meta, write) {
   if (!setup.ffmpegPath()) throw Object.assign(new Error('ffmpeg is not installed. Open System → Local analysis.'), { status: 409 });
   const id = 'v_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
   mkdirSync(dirs().videos, { recursive: true });
   const v = { id, ...meta, file: id + meta.ext, status: 'queued', progress: { done: 0, total: 0 }, error: null, added: new Date().toISOString() };
   delete v.ext;
-  await pipeline(req, createWriteStream(videoFile(v)));
+  await write(videoFile(v));
   try { Object.assign(v, await probe(videoFile(v)), { size: statSync(videoFile(v)).size }); }
   catch (e) { rmSync(videoFile(v), { force: true }); throw Object.assign(new Error(`${meta.name}: ${e.message}`), { status: 422 }); }
   save('vi.videos', [...listVideos(), v]);
@@ -77,10 +81,18 @@ export function reindex(id) {
 let current = null, opts = { model: 'qwen3-vl:2b-instruct', sampling: 0.5, describe: null };   // describe: test hook
 export const configure = o => { opts = { ...opts, ...o }; };
 export const busy = () => !!current;
+// Clips waiting or being indexed (feeds stop capturing while this is high) and the measured model speed.
+export const WORKING = ['queued', 'transcoding', 'extracting', 'analyzing'];
+export function backlog() {
+  const all = listVideos(), wait = all.filter(v => WORKING.includes(v.status)), speed = all.filter(v => v.secPerFrame).slice(-10);
+  const secPerFrame = speed.length ? speed.reduce((n, v) => n + v.secPerFrame, 0) / speed.length : null;
+  const seconds = wait.reduce((n, v) => n + (v.duration || 0), 0);
+  return { clips: wait.length, seconds, secPerFrame, eta: secPerFrame ? Math.round(seconds * opts.sampling * secPerFrame) : null };
+}
 
 function kick() {
   if (current) return;
-  const next = listVideos().find(v => ['queued', 'transcoding', 'extracting', 'analyzing'].includes(v.status));
+  const next = listVideos().find(v => WORKING.includes(v.status));
   if (!next) return;
   current = { id: next.id, cancelled: false };
   index(next).catch(e => { const v = get(current.id); if (v) put({ ...v, status: 'failed', error: e.message }); })
@@ -119,11 +131,11 @@ async function index(v) {
   const dets = existsSync(detFile(v.id)) ? JSON.parse(readFileSync(detFile(v.id), 'utf8')) : [];
   const doneN = new Set(dets.map(d => d.n));
   put({ ...get(v.id), status: 'analyzing', model: opts.model, sampling: opts.sampling, progress: { done: dets.length, total: frames.length } });
-  let streak = 0;
+  let streak = 0, began = Date.now(), fresh = 0;
   for (const f of frames) {
     if (current.cancelled) return;
     if (doneN.has(f.n)) continue;
-    const d = { ...f, ...await describeSafely(readFileSync(frameFile(v.id, f.n)).toString('base64')) };
+    const d = { ...f, ...await describeSafely(readFileSync(frameFile(v.id, f.n)).toString('base64')) }; fresh++;
     dets.push(d);
     streak = d.failed ? streak + 1 : 0;
     // A model that never answers in JSON (e.g. a reasoning model) fails fast instead of grinding through every frame.
@@ -137,7 +149,7 @@ async function index(v) {
   const skipped = dets.filter(d => d.failed);
   if (skipped.length > dets.length / 2) throw new Error(`${skipped.length} of ${dets.length} frames could not be analysed: ${skipped.at(-1).failed}`);
   put({ ...get(v.id), status: 'ready', indexedAt: new Date().toISOString(), progress: { done: frames.length, total: frames.length },
-    skipped: skipped.length, found: dets.reduce((n, d) => n + d.objects.length, 0) });
+    skipped: skipped.length, found: dets.reduce((n, d) => n + d.objects.length, 0), ...(fresh ? { secPerFrame: +((Date.now() - began) / 1000 / fresh).toFixed(1) } : {}) });
 }
 
 // One unusable reply (empty, cut off, or reasoning instead of JSON) is retried once, then that frame is skipped rather
@@ -212,8 +224,7 @@ export async function describeFrame(b64) {
 
 // Search's verify step: look at the evidence frame again with the question.
 export async function verify(e, question) {
-  const v = get(e.cameraId);
-  const r = await chat([readFileSync(frameFile(v.id, e.n)).toString('base64')],
+  const r = await chat([readFileSync(frameFile(e.vid, e.n)).toString('base64')],
     `Question about this CCTV frame: "${question}". The candidate is the ${e.entity} described as "${e.label}". Does the frame show what the question asks about? Answer yes, no or unsure, with a reason of at most 12 words.`,
     { type: 'object', required: ['answer', 'reason'], properties: { answer: { enum: ['yes', 'no', 'unsure'] }, reason: { type: 'string' } } });
   return { answer: r.answer, reason: r.reason, model: opts.model };
@@ -268,35 +279,55 @@ function clockOf(iso, tz, day) {
 }
 const hms = s => [s / 3600, (s % 3600) / 60, s % 60].map(n => String(Math.floor(n)).padStart(2, '0')).join(':');
 
-// Builds the "My footage" dataset in the same shape as data.js.
-export function dataset() {
-  const ready = listVideos().filter(v => v.status === 'ready').sort((a, b) => a.start.localeCompare(b.start));
-  if (!ready.length) return { source: 'mine', DEMO: false, DAY: new Date().toISOString().slice(0, 10), TZ: '', WINDOW: ['00:00:00', '00:00:01'], cameras: [], events: [], tracks: {} };
-  const day = clockOf(ready[0].start, ready[0].tz).date;
+// Builds the "My footage" dataset in the same shape as data.js. Clips that share a cameraKey (a live feed's captures,
+// an archive camera's files) form one camera: its coverage is the clips, and frames/events carry the clip id (v/vid)
+// and clip-relative time (vt) for images, playback and verification. Times (t) are seconds from the camera's first clip.
+// One day at a time: footage from different days (an archive from 2018, live captures from today) cannot share the
+// seconds-since-midnight time axis, so the dataset is the chosen day's footage (default: the latest) and lists the rest.
+const camKey = v => v.cameraKey || v.id;
+export function dataset(pick = null) {
+  const all = listVideos().filter(v => v.status === 'ready').sort((a, b) => a.start.localeCompare(b.start));
+  const dateOf = v => clockOf(v.start, v.tz).date, days = [...new Set(all.map(dateOf))].sort().reverse();
+  const day = days.includes(pick) ? pick : days[0], ready = all.filter(v => dateOf(v) === day);
+  if (!ready.length) return { source: 'mine', DEMO: false, DAY: new Date().toISOString().slice(0, 10), TZ: '', WINDOW: ['00:00:00', '00:00:01'], cameras: [], events: [], tracks: {}, days };
+  const groups = new Map();
+  for (const v of ready) groups.set(camKey(v), [...(groups.get(camKey(v)) || []), v]);
   const cameras = [], events = [], tracks = {};
-  ready.forEach((v, i) => {
-    const t0 = clockOf(v.start, v.tz, day).sec, frames = existsSync(detFile(v.id)) ? JSON.parse(readFileSync(detFile(v.id), 'utf8')) : [];
-    cameras.push({ id: v.id, code: `CAM ${String(i + 1).padStart(2, '0')}`, name: v.name, location: v.location, tz: v.tz, status: 'ready', real: true,
-      coverage: [[hms(t0), hms(t0 + v.duration)]], sync: 0, neighbors: v.neighbors || [], width: v.width, height: v.height, t0,
-      frames: frames.map(f => ({ n: f.n, t: f.t, faces: f.faces, plates: f.plates })) });
-    track(frames, Math.max(3, 2.5 / (v.sampling || 0.5))).forEach((tr, k) => {
-      const ds = tr.dets, rep = ds.reduce((a, b) => b.box[2] * b.box[3] > a.box[2] * a.box[3] ? b : a);
-      const c = d => [+(d.box[0] + d.box[2] / 2).toFixed(1), +(d.box[1] + d.box[3] / 2).toFixed(1)];   // box centre
-      const id = `${v.id}_${k}`, trackId = `${v.id}:${k}`;
-      tracks[trackId] = mode(ds.map(d => d.label)) || tr.type;
-      events.push({ id, cameraId: v.id, track: trackId, entity: ENTITY[tr.type] || 'object', n: rep.n, t: rep.t, time: hms(t0 + rep.t),
-        attrs: trackWords(ds), action: mode(ds.map(d => d.action).filter(Boolean)) || 'present', label: cap(tracks[trackId]),
-        path: [c(ds[0]), c(ds.at(-1))], dets: ds.map(d => ({ t: d.t, box: d.box })), seen: ds.length,
-        conf: { semantic: 0.75, visual: Math.min(1, 0.5 + 0.5 * (ds.length - 1) / 3) },
-        quality: { occlusion: 'unknown', blur: 'unknown', lighting: mode(ds.map(d => d.lighting)) === 'good' ? 'good' : 'low', angle: 'unknown' } });
-    });
+  [...groups].forEach(([key, vs], i) => {
+    const t0 = clockOf(vs[0].start, vs[0].tz, day).sec;
+    const cam = { id: key, code: `CAM ${String(i + 1).padStart(2, '0')}`, name: vs[0].name, location: vs[0].location, tz: vs[0].tz, status: 'ready', real: true,
+      coverage: [], sync: 0, neighbors: [...new Set(vs.flatMap(v => v.neighbors || []))], width: vs[0].width, height: vs[0].height, t0, frames: [],
+      clips: vs.length, source: vs[0].source || null };
+    for (const v of vs) {
+      const off = clockOf(v.start, v.tz, day).sec - t0, frames = existsSync(detFile(v.id)) ? JSON.parse(readFileSync(detFile(v.id), 'utf8')) : [];
+      cam.coverage.push([t0 + off, t0 + off + v.duration]);
+      cam.frames.push(...frames.map(f => ({ n: f.n, v: v.id, t: +(off + f.t).toFixed(2), faces: f.faces, plates: f.plates })));
+      track(frames, Math.max(3, 2.5 / (v.sampling || 0.5))).forEach((tr, k) => {
+        const ds = tr.dets, rep = ds.reduce((a, b) => b.box[2] * b.box[3] > a.box[2] * a.box[3] ? b : a);
+        const c = d => [+(d.box[0] + d.box[2] / 2).toFixed(1), +(d.box[1] + d.box[3] / 2).toFixed(1)];   // box centre
+        const id = `${v.id}_${k}`, trackId = `${v.id}:${k}`;
+        tracks[trackId] = mode(ds.map(d => d.label)) || tr.type;
+        events.push({ id, cameraId: key, vid: v.id, vt: rep.t, track: trackId, entity: ENTITY[tr.type] || 'object', n: rep.n, t: +(off + rep.t).toFixed(2), time: hms(t0 + off + rep.t),
+          attrs: trackWords(ds), action: mode(ds.map(d => d.action).filter(Boolean)) || 'present', label: cap(tracks[trackId]),
+          path: [c(ds[0]), c(ds.at(-1))], dets: ds.map(d => ({ t: +(off + d.t).toFixed(2), box: d.box })), seen: ds.length,
+          conf: { semantic: 0.75, visual: Math.min(1, 0.5 + 0.5 * (ds.length - 1) / 3) },
+          quality: { occlusion: 'unknown', blur: 'unknown', lighting: mode(ds.map(d => d.lighting)) === 'good' ? 'good' : 'low', angle: 'unknown' } });
+      });
+    }
+    // overlapping clips merge into one covered span; the gaps between captures stay visible as coverage gaps
+    const merged = [];
+    for (const [a, b] of cam.coverage.sort((x, y) => x[0] - y[0])) merged.length && a <= merged.at(-1)[1] + 1 ? merged.at(-1)[1] = Math.max(merged.at(-1)[1], b) : merged.push([a, b]);
+    cam.coverage = merged.map(([a, b]) => [hms(a), hms(b)]);
+    cam.frames.sort((a, b) => a.t - b.t);
+    cameras.push(cam);
   });
   linkAcrossCameras(events, cameras);
-  const all = cameras.flatMap(c => c.coverage[0].map(s => +s.split(':').reduce((h, x) => h * 60 + +x, 0)));
-  return { source: 'mine', DEMO: false, DAY: day, TZ: tzLabel(ready[0].tz), WINDOW: [hms(Math.min(...all)), hms(Math.max(...all))], cameras, events, tracks };
+  const span = cameras.flatMap(c => c.coverage.flat().map(s => +s.split(':').reduce((h, x) => h * 60 + +x, 0)));
+  return { source: 'mine', DEMO: false, DAY: day, days, TZ: tzLabel(ready[0].tz, ready[0].start), WINDOW: [hms(Math.min(...span)), hms(Math.max(...span))], cameras, events, tracks };
 }
 const cap = s => s ? s[0].toUpperCase() + s.slice(1) : s;
-const tzLabel = tz => new Intl.DateTimeFormat('en', { timeZone: tz, timeZoneName: 'short' }).formatToParts(new Date()).find(p => p.type === 'timeZoneName')?.value || tz;
+// The zone's name on the footage's own date (EST vs EDT), not today's.
+const tzLabel = (tz, at) => new Intl.DateTimeFormat('en', { timeZone: tz, timeZoneName: 'short' }).formatToParts(new Date(at)).find(p => p.type === 'timeZoneName')?.value || tz;
 
 // Possible re-identification across cameras: same entity type, shared colour/attribute words, later in time.
 // Links are only ever "possible"; the journey view says so.

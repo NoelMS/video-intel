@@ -64,7 +64,7 @@ function realFrame(c, ev, offset, privacy) {
   const d = ev?.dets.find(x => Math.abs(x.t - f.t) < 0.05);
   const masks = [...(privacy.faces ? f.faces : []), ...(privacy.plates ? f.plates : [])];
   return {
-    scene: `<image href="api/videos/${c.id}/frames/${f.n}" width="640" height="360" preserveAspectRatio="none"/>`
+    scene: `<image href="api/videos/${f.v ?? c.id}/frames/${f.n}" width="640" height="360" preserveAspectRatio="none"/>`
       + masks.map(([x, y, w, h]) => `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="2" fill="#151514"/>`).join(''),
     obj: d ? { box: d.box, svg: '' } : null, stamp: hms(c.t0 + f.t), masked: masks.length ? `${masks.length} REGION${masks.length > 1 ? 'S' : ''} MASKED` : '',
   };
