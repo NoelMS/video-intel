@@ -864,7 +864,7 @@ function pollVideos() {
     if (S.videos.filter(v => v.status === 'ready').length !== readyBefore && !ds().DEMO) { await loadDataset(); if (S.view !== 'cameras') render(); }
     if (S.view === 'cameras') $('#videos') ? ($('#videos').innerHTML = videosList()) : render();
     // keep polling while clips index, imports download, or live cameras capture
-    if (S.videos.some(v => WORKING.includes(v.status)) || S.ingest.imports.some(i => ['queued', 'downloading'].includes(i.state)) || S.ingest.feeds.some(f => f.active)) videoPoll = setTimeout(tick, 3000);
+    if (S.videos.some(v => WORKING.includes(v.status)) || S.ingest.imports.some(i => ['queued', 'downloading'].includes(i.state)) || S.ingest.feeds.some(f => f.active || f.capturing)) videoPoll = setTimeout(tick, 3000);
     else if (S.view === 'cameras') render();
   };
   tick();
@@ -996,7 +996,7 @@ function ingestPanel() {
       ${f.image ? `<img loading="lazy" src="${esc(f.image)}" alt="">` : '<span class="noimg"></span>'}
       <div><p class="cn">${esc(f.name)}</p><p class="mono dim">${esc(FEED_KIND[f.provider] || 'Stream')} · every ${f.intervalMin} min · ${f.captures} capture${f.captures === 1 ? '' : 's'}</p>
         <p class="mono ${f.lastError ? 'warn' : 'dim'}">${f.active ? esc(f.state) : 'Paused'}${f.last ? ` · last ${new Date(f.last).toLocaleTimeString('en-GB')}` : ''}${f.lastError ? ` · ${esc(f.lastError)}` : ''}</p></div>
-      <div class="acts"><button class="txt" data-act="feed-toggle" data-id="${f.id}" data-on="${f.active ? 0 : 1}">${f.active ? 'Pause' : 'Resume'}</button><button class="txt danger" data-act="feed-del" data-id="${f.id}">Remove</button></div></li>`).join('')}</ol>
+      <div class="acts"><button class="txt" data-act="feed-capture" data-id="${f.id}" ${f.capturing ? 'disabled' : ''}>${f.capturing ? 'Capturing…' : 'Capture now'}</button><button class="txt" data-act="feed-toggle" data-id="${f.id}" data-on="${f.active ? 0 : 1}">${f.active ? 'Pause' : 'Resume'}</button><button class="txt danger" data-act="feed-del" data-id="${f.id}">Remove</button></div></li>`).join('')}</ol>
       <p class="attrib">${[...new Set(ig.feeds.map(f => ig.attribution[f.provider]).filter(Boolean))].join(' ')}</p></section>` : ''}
     ${active.length || failed.length ? `<section class="imports"><p class="eyebrow">IMPORTS</p><ol>${[...active, ...failed].slice(0, 12).map(i => `<li><span>${esc(i.name)} <span class="mono dim">${esc(i.url.split('/').pop())}</span></span>
       <span class="mono ${i.state === 'failed' ? 'warn' : 'dim'}">${i.state === 'failed' ? esc(i.error) : i.state === 'downloading' ? `${mb(i.done)} / ${mb(i.total || 0)}` : 'queued'}</span></li>`).join('')}</ol>
@@ -1409,6 +1409,7 @@ const ACT = {
   'src-add-cams': () => addPickedCams(),
   'meva-go': d => { SRC.mevaPrefix = d.prefix; loadSourceList(); },
   'meva-import': () => importMeva(),
+  'feed-capture': async d => { S.ingest = await api.captureFeed(d.id); render(); pollVideos(); },
   'feed-toggle': async d => { S.ingest = await api.updateFeed(d.id, { active: d.on === '1' }); render(); pollVideos(); },
   'feed-del': async d => { if (!confirm('Stop capturing this camera? Clips already indexed stay.')) return; S.ingest = await api.removeFeed(d.id); render(); },
   'imports-clear': async () => { S.ingest = await api.clearImports(); render(); },

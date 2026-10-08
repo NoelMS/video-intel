@@ -219,6 +219,17 @@ ES modules need an http origin. Opening `index.html` from disk will not work.
     - A cancelled detector run restarts that step.
     - 2 fps stores 4× the frame JPEGs of 0.5 fps.
 
+- **Capture now, and boxes that no longer run ahead**:
+  - **"Capture now"** on each live camera (`POST feeds/:id/capture`, `sources.captureNow`):
+    - Captures immediately, using the same code as the timer (`captureFeed`). It works on a paused camera and ignores the backlog limit, since a person asked for it.
+    - The next timed capture counts from it.
+    - A TfL camera only publishes a new clip every minute or so; forcing it before then answers "No new clip since the last capture" (TfL honours If-Modified-Since with 304).
+    - The UI shows "Capturing…" and polls while a capture runs.
+    - Tested on a paused Piccadilly Circus camera: captured in 5 s and indexed in 37 s, and the camera stayed paused.
+  - **Timing bug**: every sampled frame showed the scene ~half a sampling interval after its stored time. The fps filter labels each slot with its start but keeps the slot's last frame. That's +0.24 s at 2 fps (+1 s at 0.5 fps), measured by matching each JPEG's pixels against every source frame, so playback boxes ran ahead of the objects.
+  - **Fix**: frames are now picked with `select` (the first real frame of each 1/rate slot) and keep their own timestamps; measured 0.000 s off on three clips.
+  - **Older recordings**: those indexed before (no `exactTimes` on the video) are shifted by 0.5/sampling in `dataset()`. Re-indexing makes them exact.
+
 ## Footage sources (researched)
 
 Live feeds (for the live-ingest stretch goal; all free, check each licence before redistributing):

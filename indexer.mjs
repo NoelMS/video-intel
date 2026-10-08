@@ -122,13 +122,18 @@ async function index(v) {
     put({ ...v, status: 'extracting', progress: { done: 0, total: Math.round(v.duration) } });
     rmSync(fdir, { recursive: true, force: true }); mkdirSync(fdir, { recursive: true });
     const times = [];
+    // The first real frame of each 1/rate slot, with its own timestamp. The fps filter labelled each slot with its start
+    // but kept the slot's last frame, so every frame showed the scene ~half a slot later than its time (+0.24 s at
+    // 2 fps, measured by matching pixels): boxes ran ahead of the objects in playback.
+    const r = rate();
     await run(setup.ffmpegPath(), ['-hide_banner', '-nostats', '-i', videoFile(v), '-an',
-      '-vf', `fps=${rate()},mpdecimate,scale='min(768,iw)':-2,showinfo`, '-fps_mode', 'vfr', '-q:v', '4', join(fdir, '%06d.jpg')],
+      '-vf', `select='isnan(prev_selected_t)+gt(floor(t*${r}),floor(prev_selected_t*${r}))',mpdecimate,scale='min(768,iw)':-2,showinfo`, '-fps_mode', 'vfr', '-q:v', '4', join(fdir, '%06d.jpg')],
     line => {
       const m = line.match(/\bpts_time:\s*([\d.]+)/);
       if (m) { times.push(+m[1]); if (times.length % 10 === 0) put({ ...get(v.id), progress: { done: Math.round(+m[1]), total: Math.round(v.duration) } }); }
     });
-    writeFileSync(join(fdir, 'frames.json'), JSON.stringify(times.map((t, i) => ({ n: i + 1, t: +t.toFixed(2) }))));
+    writeFileSync(join(fdir, 'frames.json'), JSON.stringify(times.map((t, i) => ({ n: i + 1, t: +t.toFixed(3) }))));
+    put({ ...get(v.id), exactTimes: true });
   }
   const frames = JSON.parse(readFileSync(join(fdir, 'frames.json'), 'utf8'));
   if (!opts.describe && !await setup.ensureOllama()) throw new Error('Ollama is not running. Open System → Local analysis.');
@@ -436,7 +441,9 @@ export function dataset(pick = null) {
       coverage: [], sync: 0, neighbors: [...new Set(vs.flatMap(v => v.neighbors || []))], width: vs[0].width, height: vs[0].height, t0, frames: [],
       clips: vs.length, source: vs[0].source || null };
     for (const v of vs) {
-      const off = clockOf(v.start, v.tz, day).sec - t0, frames = existsSync(detFile(v.id)) ? JSON.parse(readFileSync(detFile(v.id), 'utf8')) : [];
+      // Recordings indexed before exactTimes show each frame's scene half a sampling interval after its stored time.
+      const late = v.exactTimes ? 0 : 0.5 / (v.sampling || 0.5), off = clockOf(v.start, v.tz, day).sec - t0;
+      const frames = (existsSync(detFile(v.id)) ? JSON.parse(readFileSync(detFile(v.id), 'utf8')) : []).map(f => ({ ...f, t: f.t + late }));
       cam.coverage.push([t0 + off, t0 + off + v.duration]);
       cam.frames.push(...frames.map(f => ({ n: f.n, v: v.id, t: +(off + f.t).toFixed(2), faces: f.faces, plates: f.plates })));
       track(frames, Math.max(3, 2.5 / (v.sampling || 0.5))).forEach((tr, k) => {

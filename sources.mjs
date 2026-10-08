@@ -91,11 +91,23 @@ const capturing = new Set();
 async function tick() {
   for (const f of listFeeds().filter(f => f.active && f.next <= Date.now() && !capturing.has(f.id))) {
     if (indexer.backlog().clips >= MAX_BACKLOG) { putFeed({ ...f, state: 'Paused while the indexing backlog clears', next: Date.now() + 60e3 }); continue; }
-    capturing.add(f.id);
-    capture(f).catch(e => ({ lastError: e.message, state: 'Capture failed; retrying next interval' }))
-      .then(patch => { const cur = listFeeds().find(x => x.id === f.id); if (cur) putFeed({ ...cur, ...patch, next: Date.now() + cur.intervalMin * 60e3 }); })
-      .finally(() => capturing.delete(f.id));
+    captureFeed(f);
   }
+}
+// The next timed capture counts from this one, so a forced capture does not get a second clip straight after it.
+function captureFeed(f) {
+  capturing.add(f.id);
+  putFeed({ ...f, capturing: true, state: 'Capturing…' });
+  return capture(f).catch(e => ({ lastError: e.message, state: 'Capture failed; retrying next interval' }))
+    .then(patch => { const cur = listFeeds().find(x => x.id === f.id); if (cur) putFeed({ ...cur, ...patch, capturing: false, next: Date.now() + cur.intervalMin * 60e3 }); })
+    .finally(() => capturing.delete(f.id));
+}
+// "Capture now": also on a paused camera, and past the backlog limit, since someone asked for it. A TfL camera only
+// publishes a new clip every few minutes, so forcing it early can still answer "No new clip since the last capture".
+export function captureNow(id) {
+  const f = listFeeds().find(x => x.id === id);
+  if (!f) throw Object.assign(new Error('No such camera'), { status: 404 });
+  if (!capturing.has(id)) captureFeed(f);
 }
 let timer = null;
 export const startScheduler = () => { timer ??= setInterval(tick, 15e3); timer.unref?.(); tick(); };

@@ -253,6 +253,7 @@ const routes = [
     if ('intervalMin' in b) { if (!(+b.intervalMin >= 2 && +b.intervalMin <= 1440)) bad('intervalMin must be 2-1440'); patch.intervalMin = +b.intervalMin; }
     sources.updateFeed(id, patch); return ingest();
   }],
+  ['POST', /^feeds\/([\w-]+)\/capture$/, (_, [id]) => { sources.captureNow(id); return ingest(); }],
   ['DELETE', /^feeds\/([\w-]+)$/, (_, [id]) => { sources.removeFeed(id); return ingest(); }],
   ['POST', /^imports$/, async req => { sources.addImports(validImports(await body(req))); return ingest(); }],
   ['DELETE', /^imports$/, () => { sources.clearImports(); return ingest(); }],
