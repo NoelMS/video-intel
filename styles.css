@@ -298,6 +298,9 @@ td:first-child, th:first-child { padding-left: 0; }
 .res-name { display: grid; gap: 4px; font-size: 12px; color: var(--muted); flex: 1; min-width: 200px; }
 
 /* layer */
+/* A closed dialog stays hidden: layouts that set display on a dialog (e.g. .resolver's grid) otherwise beat the browser's
+   own dialog:not([open]) rule and leave an empty bordered box at the end of the page after the dialog closes. */
+dialog:not([open]) { display: none !important; }
 dialog.layer { padding: 24px 32px 32px; width: min(1320px, 96vw); max-height: 94vh; background: var(--bg); color: var(--text); border: 1px solid var(--line-strong); border-radius: var(--r2); overflow: auto; }
 dialog.layer::backdrop { background: rgba(8, 8, 7, .8); }
 dialog.layer[open] { animation: rise var(--med) var(--ease); }
@@ -639,3 +642,5 @@ dialog.capture { width: min(560px, 96vw); } dialog.capture .ev-top .txt { white-
 .page-h > .acts { flex-wrap: wrap; justify-content: flex-end; }
 @media (max-width: 680px) { .feed { grid-template-columns: 90px 1fr; } .feed img, .feed .noimg { width: 90px; } .feed .acts { grid-column: 1 / -1; } }
 .day-pick select { font: 500 12px/1 var(--sans); padding: 6px 8px; border-radius: var(--r2); background: var(--surface); border: 1px solid var(--line); color: var(--text-2); }
+
+.ctxbar .home-link { margin-right: 6px; font: inherit; letter-spacing: inherit; }

@@ -284,6 +284,16 @@ ES modules need an http origin. Opening `index.html` from disk will not work.
     - **Naming**: only tracks seen for at least 1 s are named (blips keep the class name).
     - **Cost**: 5 fps measured 28 s and 43 s per ~10 s clip (2.6x and 4.3x real time), against ~2x at 2 fps; naming dominates.
 
+- **Home, duplicate boxes, empty box, smooth tracking, real-footage README**:
+  - **Home**: "← Home" at the start of every result's context bar, the logo, and the Search tab while a result is shown (`ACT.home`: `clearSearch()`, empty query, the search page). The Search tab from another page still returns to the result.
+  - **Duplicate boxes**: `detector.mjs` also drops a box of the same kind that sits at least 85% inside another of comparable size (area ratio >= 0.35, so a small car in front of a bus stays). Nested same-kind pairs fell from 125 to 42 in 1,289 frames; tracking F1 0.900 -> 0.902.
+  - **Empty box after an action** (e.g. saving a referent): `.resolver`'s `display: grid` beat the browser's `dialog:not([open])`, so the closed dialog stayed on screen as an empty bordered box. `dialog:not([open]) { display: none !important; }` fixes it for every layer. Reproduced and verified headlessly (closed dialog 1320x58 -> 0x0).
+  - **Smooth boxes**: `boxAt` glides between consecutive sightings (at most 1.5 intervals apart) only once the object has been seen twice in a row. It holds at the first sighting, shows nothing in a gap, and vanishes one interval after the last sighting. Measured: a long-lived van's box moved on 23 video frames a second; a newcomer was hidden just before its first sighting and appeared exactly at it.
+  - **README demo**: the hero is `docs/screenshots/playback.gif`, 6 s of a TfL JamCam at Tower Bridge with tracked, named objects. The screenshot table is real footage (search, result, evidence, playback, cameras, camera picker, Capture now, setup, system); the synthetic-scene images were deleted.
+    - Captured with headless Chrome (`playwright-core`, `channel: 'chrome'`) against a test server that indexed three TfL clips. The GIF frames are the paused video seeked in 0.1 s steps, each screenshotted after `requestVideoFrameCallback` (frame-exact, no screen recording), then joined with the bundled ffmpeg (palettegen, 640 px, 10 fps).
+    - Browser checks now run headless the same way, with no visible window.
+  - **Cursor**: `main`, all branches and GitHub's contributors API are clean. The repo page's contributor sidebar (`/contributors_list`) still lists `@cursoragent`, from cached co-author data and/or `refs/pull/1/head` (PR #1's frozen commits, which GitHub does not let owners rewrite). Removing it needs GitHub Support (ask them to remove the PR #1 ref and cached views) or recreating the repository.
+
 ## Footage sources (researched)
 
 Live feeds (for the live-ingest stretch goal; all free, check each licence before redistributing):

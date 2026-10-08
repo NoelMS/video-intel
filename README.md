@@ -4,7 +4,9 @@ Ask questions about recorded multi-camera footage in plain English — *"Did a r
 
 Built for problem statement **HNX26EPS05: Multi-Stream Video Intelligence with Conversational Query**. Everything runs locally: no cloud calls, no npm dependencies.
 
-![Supported answer with evidence](docs/screenshots/02-supported-answer.png)
+![Playback of a real London traffic camera with tracked, labelled objects](docs/screenshots/playback.gif)
+
+*Real footage: a TfL JamCam at Tower Bridge Approach, indexed on a laptop (RTX 3050, 4 GB). Every object is found by the detector, followed between frames, and named once by the local vision model.*
 
 ## What it does
 
@@ -21,12 +23,17 @@ Built for problem statement **HNX26EPS05: Multi-Stream Video Intelligence with C
 
 ## Screenshots
 
+All from real public camera footage (TfL JamCams, London) indexed on this computer.
+
 | | |
 |---|---|
-| ![Landing](docs/screenshots/01-search-landing.png) **Search** | ![Journey](docs/screenshots/03-cross-camera-journey.png) **Cross-camera journey** |
-| ![Clarify](docs/screenshots/04-clarify-unknown-place.png) **Asks once about an unknown place** | ![Refusal](docs/screenshots/05-refusal-verification.png) **Refuses when evidence is insufficient** |
-| ![Live](docs/screenshots/10-live.png) **Replay with standing queries** | ![System](docs/screenshots/14-system.png) **Index coverage and sync** |
-| ![Setup](docs/screenshots/00-first-launch-setup.png) **Local analysis setup** | ![Mobile](docs/screenshots/20-mobile.png) **Mobile layout** |
+| ![Search](docs/screenshots/01-search.png) **Search your cameras** | ![Result](docs/screenshots/02-result.png) **"Find the white van": candidates, each visually checked by the model** |
+| ![Evidence](docs/screenshots/03-evidence.png) **Evidence: frame, object, time and the checks behind it** | ![Playback](docs/screenshots/04-playback.png) **Playback with every tracked object boxed and labelled** |
+| ![Cameras](docs/screenshots/05-cameras.png) **Live public cameras and indexed recordings** | ![Add live cameras](docs/screenshots/06-add-live-cameras.png) **Pick from ~890 London and California cameras** |
+| ![Capture now](docs/screenshots/07-capture-now.png) **Capture now, for as long as you choose** | ![Setup](docs/screenshots/08-setup.png) **One-click local setup: ffmpeg, Ollama, detector, model** |
+| ![System](docs/screenshots/09-system.png) **Index coverage, search depth, privacy** | |
+
+The app also ships a synthetic seven-camera demo (the **Demo** switch in the header) for trying it without footage.
 
 ## Quick start
 

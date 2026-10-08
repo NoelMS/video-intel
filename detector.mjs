@@ -46,6 +46,8 @@ export async function* frames(ffmpeg, pattern) {
   }
 }
 
+const area = b => Math.max(1, (b[2] - b[0]) * (b[3] - b[1]));
+const inter = (a, b) => Math.max(0, Math.min(a[2], b[2]) - Math.max(a[0], b[0])) * Math.max(0, Math.min(a[3], b[3]) - Math.max(a[1], b[1]));
 const iou = (a, b) => {
   const x = Math.max(0, Math.min(a[2], b[2]) - Math.max(a[0], b[0])), y = Math.max(0, Math.min(a[3], b[3]) - Math.max(a[1], b[1]));
   return x * y / ((a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - x * y || 1);
@@ -71,8 +73,15 @@ export async function detect(bgr, w, h) {
   }
   found.sort((a, b) => b.score - a.score);
   // Overlapping boxes of one class are one object; so are near-identical boxes of the same kind (a London taxi came out
-  // as both "car" and "truck", and became two tracks).
-  const keep = found.filter((f, i) => !found.slice(0, i).some(g => iou(g.b, f.b) > (g.cls === f.cls ? NMS_IOU : TYPE[g.cls] === TYPE[f.cls] ? 0.7 : 1)));
+  // as both "car" and "truck", and became two tracks), and a box of the same kind sitting almost entirely inside another
+  // of comparable size: one vehicle boxed twice, tight and loose (125 such pairs in 1,289 frames of TfL footage). A much
+  // smaller box inside a big one (a car in front of a bus) is a different object and stays.
+  const keep = found.filter((f, i) => !found.slice(0, i).some(g => {
+    if (iou(g.b, f.b) > (g.cls === f.cls ? NMS_IOU : TYPE[g.cls] === TYPE[f.cls] ? 0.7 : 1)) return true;
+    if (TYPE[g.cls] !== TYPE[f.cls]) return false;
+    const [ag, af] = [area(g.b), area(f.b)];
+    return inter(g.b, f.b) / Math.min(ag, af) >= 0.85 && Math.min(ag, af) / Math.max(ag, af) >= 0.35;
+  }));
   // letterbox pixels -> source pixels -> 640x360 app space, clipped to the picture
   const r = Math.min(SIZE / w, SIZE / h), sx = 640 / w, sy = 360 / h;
   return keep.map(f => {

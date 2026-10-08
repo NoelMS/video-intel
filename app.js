@@ -76,7 +76,7 @@ function header() {
   const nav = [['search', 'Search'], ['cameras', 'Cameras'], ['live', 'Live'], ['memory', 'Memory'], ['investigation', 'Investigation'], ['system', 'System']];
   return `<a class="skip" href="#main">Skip to content</a>
   <header class="top">
-    <button class="mark" data-act="go" data-view="search">Multi-Stream <b>Video Intelligence</b></button>
+    <button class="mark" data-act="home">Multi-Stream <b>Video Intelligence</b></button>
     <nav aria-label="Primary">${nav.map(([v, l]) => `<button data-act="go" data-view="${v}" ${S.view === v ? 'aria-current="page"' : ''}>${l}</button>`).join('')}</nav>
     <div class="sys">
       ${!ds().DEMO && ds().days?.length > 1 ? `<label class="day-pick"><span class="sr-only">Day</span><select data-day aria-label="Day of footage">${ds().days.map(d => `<option value="${d}" ${d === ds().DAY ? 'selected' : ''}>${new Date(d + 'T12:00Z').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</option>`).join('')}</select></label>` : ''}
@@ -195,7 +195,7 @@ function stage() {
   if (S.phase === 'error') return `<div class="state"><p class="verdict ins" tabindex="-1">SEARCH INTERRUPTED</p><h2 class="claim">${esc(S.error)}</h2>
     <div class="acts"><button class="btn" data-act="ask" data-q="${esc(S.query)}">Retry</button><button class="txt" data-act="go" data-view="cameras">Inspect system status</button></div></div>`;
   const r = S.res;
-  return `<div class="ctxbar mono"><span><b>QUERY</b> ${esc(S.query)}</span><span><b>TIME</b> ${hm(r.window[0])} → ${r.window[1] > r.window[0] ? hm(r.window[1]) : 'end'} ${ds().TZ}</span>
+  return `<div class="ctxbar mono"><button class="txt home-link" data-act="home">← Home</button><span><b>QUERY</b> ${esc(S.query)}</span><span><b>TIME</b> ${hm(r.window[0])} → ${r.window[1] > r.window[0] ? hm(r.window[1]) : 'end'} ${ds().TZ}</span>
     <span><b>CAMERAS</b> ${r.scoped.length}</span><span><b>STATUS</b> ${STATUS[r.status]}</span></div>` + RESULT[r.status](r);
 }
 
@@ -1053,15 +1053,22 @@ function videoLayer({ id, t = 0, det = true }) {
         onerror="this.closest('.vfs').outerHTML='<p class=&quot;warn&quot;>This recording cannot be played. Re-index it to make a browser-playable copy.</p>'"></video>
       <div id="vbox" aria-hidden="true">${V.evs.map(e => `<div class="vb ${e.entity}" hidden><span>${tid(e.track)} · ${esc(e.label)}</span></div>`).join('')}</div>
       <button class="vfs-btn" data-act="vfull" title="Full screen (F)" aria-label="Full screen">⛶</button></div></div>
-    <p class="mono dim">${V.evs.length ? `${V.evs.length} tracked object${V.evs.length === 1 ? '' : 's'} · each box shows the object's latest sighting (frames sampled every ${+V.gap.toFixed(2)} s). ` : ''}Privacy masks apply to extracted frames only, not to playback.</p>`;
+    <p class="mono dim">${V.evs.length ? `${V.evs.length} tracked object${V.evs.length === 1 ? '' : 's'} · boxes follow objects between sightings sampled every ${+V.gap.toFixed(2)} s, and appear or vanish with them. ` : ''}Privacy masks apply to extracted frames only, not to playback.</p>`;
 }
-// Box at time t: the track's latest sighting at or before t, held until the next one, gone one sampling interval after
-// the last. No interpolation: sliding a box towards the next sighting moved it before the object did.
+// Box at time t. A box appears at the object's first sighting and disappears one sampling interval after its last,
+// with no lead-in or fade. While the object stays in view (already seen twice, and seen again at the next sample), the
+// box glides between consecutive sightings; a gap in the track shows nothing, and there is no gliding into or out of
+// it. At 5 fps consecutive sightings are 0.2 s apart, so the glide cannot run visibly ahead of the object.
+const near = (a, b) => b.t - a.t <= V.gap * 1.5;
 function boxAt(ds, t) {
   if (t < ds[0].t || t > ds.at(-1).t + V.gap) return null;
   let i = ds.length - 1;
   while (ds[i].t > t) i--;
-  return t - ds[i].t > V.gap * 1.5 ? null : ds[i].box;   // a gap in the track: nothing seen there
+  const d = ds[i], next = ds[i + 1];
+  if (t - d.t > V.gap * 1.5) return null;
+  if (!next || !near(d, next) || !(i > 0 && near(ds[i - 1], d))) return d.box;
+  const k = (t - d.t) / (next.t - d.t);
+  return d.box.map((n, j) => n + (next.box[j] - n) * k);
 }
 // Boxes follow the frame actually on screen (requestVideoFrameCallback's mediaTime); currentTime in an animation frame
 // runs a frame or two ahead of the picture.
@@ -1478,7 +1485,10 @@ const ACT = {
   'watch-del': async d => { if (!confirm('Delete this standing query? Its past alerts stay in the log.')) return; await api.deleteWatch(d.id); S.watches = await api.getWatches(); render(); },
   'define-term': d => openResolver({ name: d.term.replace(/\b\w/g, m => m.toUpperCase()), term: d.term }),
   diag: () => openLayer({ kind: 'diag' }),
-  go: d => go(d.view), ask: d => run(d.q), open: (d, el) => openEvidence(d.id, +(d.off || 0), el),
+  // The logo, "← Home" on a result, and the Search tab while a result is shown all return to the search home page.
+  go: d => d.view === 'search' && S.view === 'search' && S.phase !== 'idle' ? ACT.home() : go(d.view),
+  home: () => { clearSearch(); S.query = ''; go('search'); render(); scrollTo(0, 0); },
+  ask: d => run(d.q), open: (d, el) => openEvidence(d.id, +(d.off || 0), el),
   close: () => dlg.close(), cancel: () => S.abort?.abort(), unfollow: () => set({ context: null }),
   reveal: d => reveal(d.id), palette: () => openLayer({ kind: 'palette' }), zoom: d => zoomTo(+d.z),
   compare: d => openLayer({ kind: 'compare', ids: d.ids.split(',') }), bridge: d => openLayer({ kind: 'compare', ids: [d.from, d.to], bridge: true }),
