@@ -2072,6 +2072,106 @@
      "to": "2026-10-08T14:05:09.500Z"
     }
    ]
+  },
+  {
+   "id": "attr-person-in-a-red-jacket",
+   "split": "heldout",
+   "kind": "attribute",
+   "source": "hand-labelled",
+   "text": "Find the person in a red jacket",
+   "answers": [
+    {
+     "camera": "MEVA G506",
+     "from": "2018-03-07T16:02:01.000Z",
+     "to": "2018-03-07T16:04:46.000Z"
+    },
+    {
+     "camera": "MEVA G505",
+     "from": "2018-03-07T16:02:11.000Z",
+     "to": "2018-03-07T16:02:51.000Z"
+    },
+    {
+     "camera": "MEVA G505",
+     "from": "2018-03-07T16:03:31.000Z",
+     "to": "2018-03-07T16:03:56.000Z"
+    },
+    {
+     "camera": "MEVA G505",
+     "from": "2018-03-07T16:04:01.000Z",
+     "to": "2018-03-07T16:04:41.000Z"
+    }
+   ]
+  },
+  {
+   "id": "attr-person-sitting-on-a-bench",
+   "split": "dev",
+   "kind": "attribute",
+   "source": "hand-labelled",
+   "text": "Find a person sitting on a bench",
+   "answers": [
+    {
+     "camera": "MEVA G508",
+     "from": "2018-03-07T16:00:00.000Z",
+     "to": "2018-03-07T16:00:45.000Z"
+    },
+    {
+     "camera": "MEVA G506",
+     "from": "2018-03-07T16:00:56.000Z",
+     "to": "2018-03-07T16:05:01.000Z"
+    }
+   ]
+  },
+  {
+   "id": "attr-group-of-people-walking-across-the-car-park",
+   "split": "heldout",
+   "kind": "attribute",
+   "source": "hand-labelled",
+   "text": "Find the group of people walking across the car park",
+   "answers": [
+    {
+     "camera": "MEVA G505",
+     "from": "2018-03-07T16:02:56.000Z",
+     "to": "2018-03-07T16:03:36.000Z"
+    }
+   ]
+  },
+  {
+   "id": "attr-person-carrying-a-white-bag",
+   "split": "dev",
+   "kind": "attribute",
+   "source": "hand-labelled",
+   "text": "Find the person carrying a white bag",
+   "answers": [
+    {
+     "camera": "MEVA G419",
+     "from": "2018-03-07T16:02:06.000Z",
+     "to": "2018-03-07T16:02:16.000Z"
+    }
+   ]
+  },
+  {
+   "id": "attr-red-car-in-the-car-park",
+   "split": "heldout",
+   "kind": "attribute",
+   "source": "hand-labelled",
+   "text": "Find a red car in the car park",
+   "answers": [
+    {
+     "camera": "MEVA G339",
+     "from": "2018-03-07T16:00:07.000Z",
+     "to": "2018-03-07T16:05:07.000Z"
+    },
+    {
+     "camera": "MEVA G328",
+     "from": "2018-03-07T16:00:01.000Z",
+     "to": "2018-03-07T16:05:01.000Z"
+    },
+    {
+     "camera": "MEVA G505",
+     "from": "2018-03-07T16:03:49.000Z",
+     "to": "2018-03-07T16:04:06.000Z"
+    }
+   ]
   }
  ]
 }

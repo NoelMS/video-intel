@@ -591,10 +591,13 @@ const tzLabel = (tz, at) => new Intl.DateTimeFormat('en', { timeZone: tz, timeZo
 
 // Possible re-identification across cameras: same entity type, shared colour/attribute words, later in time.
 // Links are only ever "possible"; the journey view says so.
-// With image embeddings, a link also needs the two crops to look alike (cosine >= REID_MIN) and the label's colours not
-// to contradict: shared label words alone linked every "white van" on one camera to every "white van" on the next.
-// The most similar earlier sighting wins. Without embeddings (vision-model-only indexing), shared words decide as before.
-export const REID_MIN = 0.8;
+// With image embeddings a link needs, beyond the same kind within 15 minutes: both objects seen large enough for their
+// crops to mean something (>= 40x40 in frame space), a colour word in common, crops that look alike (cosine >=
+// REID_MIN), and a mutual best match (the earlier object's most similar later object on that camera is this one).
+// Measured on the evaluation footage (13 cameras): cosine >= 0.8 with no other conditions linked 206 pairs, many
+// plainly wrong (an unnamed "car" to a "white van"): small, blurry crops of vehicles all look alike to CLIP.
+// Without embeddings (vision-model-only indexing), shared label words decide as before.
+export const REID_MIN = 0.88;
 const COLOURS = new Set(['black', 'white', 'grey', 'silver', 'red', 'blue', 'green', 'yellow', 'orange', 'brown', 'beige', 'purple', 'pink']);
 function crop(e) {
   const em = e.vid && embeddings(e.vid), tk = +e.id.slice(e.id.lastIndexOf('_') + 1);
@@ -604,15 +607,29 @@ function crop(e) {
 function linkAcrossCameras(events, cameras) {
   const tsec = e => cameras.find(c => c.id === e.cameraId).t0 + e.t;
   const sorted = [...events].sort((a, b) => tsec(a) - tsec(b)), vec = new Map(sorted.map(e => [e, crop(e)]));
-  const colours = e => e.attrs.filter(a => COLOURS.has(a));
+  const colours = e => e.attrs.filter(a => COLOURS.has(a)), big = e => Math.max(...e.dets.map(d => d.box[2] * d.box[3])) >= 1600;
+  const near = (p, e) => p.cameraId !== e.cameraId && p.entity === e.entity && tsec(p) < tsec(e) && tsec(e) - tsec(p) < 900;
+  const seen = new Map(), bestOn = new Map();
+  const appearance = (p, e) => {   // null: no embeddings, so the word rule applies; else the cosine, or -1 when not comparable
+    const k = p.id + '|' + e.id;
+    if (!seen.has(k)) {
+      const [a, b] = [vec.get(p), vec.get(e)];
+      seen.set(k, !a || !b ? null : big(p) && big(e) && colours(p).some(c => colours(e).includes(c)) ? embed.cosine(a, b) : -1);
+    }
+    return seen.get(k);
+  };
+  const best = (p, cam) => {   // p's most similar later object on camera cam
+    const k = p.id + '|' + cam;
+    if (!bestOn.has(k)) bestOn.set(k, sorted.filter(o => o.cameraId === cam && near(p, o)).reduce((x, o) => (appearance(p, o) ?? -1) > (x ? appearance(p, x) ?? -1 : -1) ? o : x, null));
+    return bestOn.get(k);
+  };
   for (const e of sorted) {
-    const prev = sorted.filter(p => p.cameraId !== e.cameraId && p.entity === e.entity && tsec(p) < tsec(e) && tsec(e) - tsec(p) < 900)
+    const prev = sorted.filter(p => near(p, e))
       .map(p => {
-        const shared = p.attrs.filter(a => e.attrs.includes(a)), jaccard = shared.length / new Set([...p.attrs, ...e.attrs]).size;
-        const [a, b] = [vec.get(p), vec.get(e)];
-        if (!a || !b) return [p, shared, jaccard, null, shared.length >= 2 && jaccard >= 0.4];
-        const cos = embed.cosine(a, b), clash = colours(p).length && colours(e).length && !colours(p).some(c => colours(e).includes(c));
-        return [p, shared, jaccard, cos, cos >= REID_MIN && !clash];
+        const shared = p.attrs.filter(a => e.attrs.includes(a)), jaccard = shared.length / new Set([...p.attrs, ...e.attrs]).size, cos = appearance(p, e);
+        if (cos == null) return [p, shared, jaccard, null, shared.length >= 2 && jaccard >= 0.4];
+        const mutual = cos >= REID_MIN && best(p, e.cameraId) === e;
+        return [p, shared, jaccard, cos, mutual];
       })
       .filter(x => x[4]).sort((x, y) => (y[3] ?? y[2]) - (x[3] ?? x[2]))[0];
     if (prev && !sorted.some(o => o !== e && o.track === prev[0].track && o.cameraId === e.cameraId)) {

@@ -26,16 +26,27 @@ export function phrase(text, places = []) {
 const ready = () => embed.load(setup.DETECTOR_DIR);
 const places = () => api.getMemory().then(m => m.flatMap(r => [r.name, ...(r.aliases || [])]));
 
-// event id -> cosine between the query and that object's crop (events without an embedding are absent)
-export async function objectSimilarities(text) {
+// For each tracked object (event id): `objects`, the cosine between the query and the object's crop; `frames`, the best
+// cosine between the query and the 1-per-second frame embeddings while the object is on screen, with that frame's
+// clip time (`vt`): the moment the query best matches, e.g. when the person actually gets out of the car rather than
+// when they were largest in view.
+export async function similarities(text) {
   if (!await ready()) return null;
-  const q = await embed.textEmbed(phrase(text, await places())), out = new Map();
-  for (const vid of new Set(api.ds().events.map(e => e.vid).filter(Boolean))) {
+  const q = await embed.textEmbed(phrase(text, await places())), objects = new Map(), frames = new Map(), byVid = new Map();
+  for (const e of api.ds().events) if (e.vid) byVid.set(e.vid, [...(byVid.get(e.vid) || []), e]);
+  for (const [vid, evs] of byVid) {
     const em = indexer.embeddings(vid);
     if (!em) continue;
-    em.rows.forEach((r, i) => { if (r.kind === 'track') out.set(`${vid}_${r.tk}`, embed.cosine(q, em.vec(i))); });
+    const fr = [];
+    em.rows.forEach((r, i) => { if (r.kind === 'track') objects.set(`${vid}_${r.tk}`, embed.cosine(q, em.vec(i))); else fr.push([r.t, embed.cosine(q, em.vec(i))]); });
+    for (const e of evs) {
+      const off = e.t - e.vt, ts = e.dets.map(d => d.t - off), a = Math.min(...ts) - 0.5, b = Math.max(...ts) + 0.5;
+      const inside = fr.filter(([t]) => t >= a && t <= b), pool = inside.length ? inside : fr.length ? [fr.reduce((x, y) => Math.abs(y[0] - e.vt) < Math.abs(x[0] - e.vt) ? y : x)] : [];
+      const best = pool.reduce((x, y) => y[1] > x[1] ? y : x, [e.vt, -1]);
+      if (pool.length) frames.set(e.id, { score: best[1], vt: best[0] });
+    }
   }
-  return out;
+  return { objects, frames };
 }
 
 // top-k frames of the current day's cameras: [{ cameraId, vid, n, t (camera seconds), time, score }]

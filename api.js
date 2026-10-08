@@ -313,22 +313,36 @@ const wait = (ms, signal) => new Promise((res, rej) => {
 
 // verify(event, question) -> { answer: 'yes' | 'no' | 'unsure', reason, model }: the server passes the local vision
 // model for real footage. The demo has nothing to look at, so it never verifies visually.
-// Open vocabulary: with image embeddings (real footage), an object's similarity to the query is ranked against the other
-// objects being searched (a percentile, so it is on a 0-1 scale like the label scores), then blended with the share of
-// the query's attribute words its label has. Words outside the label vocabulary still count through the picture; known
-// colours and kinds still sharpen the ranking. Without embeddings (the demo), ranking is the label score as before.
-export const OPEN_VOCAB = { imageWeight: 0.5, pass: 0.75 };
-export function openVocab(pool, q, sim) {
+// Open vocabulary: with image embeddings (real footage), three signals are blended, each on a 0-1 scale:
+// - object: how well the object's crop matches the query, as a percentile among the objects being searched;
+// - frame: how well the best whole frame while the object is on screen matches (also a percentile), which carries
+//   context the crop lacks (the car the person is getting out of, the bicycle under the cyclist);
+// - labels: the share of the query's attribute words in the object's label.
+// Words outside the label vocabulary still count through the pictures; known colours and kinds still sharpen the
+// ranking. Without embeddings (the demo), ranking is the label score as before. Weights tuned on the dev split only.
+export const OPEN_VOCAB = { object: 0.5, frame: 0, labels: 0.5, pass: 0.75 };   // frame 0: it picks each object's moment, but ranking by it hurt on dev (Hit@5 0.64 -> 0.41 at 0.2)
+const percentile = values => {
+  const v = values.filter(x => x != null).sort((a, b) => a - b);
+  return x => { let lo = 0, hi = v.length; while (lo < hi) { const m = (lo + hi) >> 1; v[m] < x ? lo = m + 1 : hi = m; } return v.length > 1 ? lo / (v.length - 1) : 1; };
+};
+export function openVocab(pool, q, sim, frames = null, weights = {}) {
+  const W8 = { ...OPEN_VOCAB, ...weights };
   const attrsOk = e => q.attrs.every(a => e.attrs.includes(a));
-  if (!sim?.size) return Object.assign(e => score(e), { pass: attrsOk });
-  const vals = pool.map(e => sim.get(e.id)).filter(v => v != null).sort((a, b) => a - b);
-  const pct = v => { let lo = 0, hi = vals.length; while (lo < hi) { const m = (lo + hi) >> 1; vals[m] < v ? lo = m + 1 : hi = m; } return vals.length > 1 ? lo / (vals.length - 1) : 1; };
+  if (!sim?.size && !frames?.size) return Object.assign(e => score(e), { pass: attrsOk });
+  const po = sim?.size ? percentile(pool.map(e => sim.get(e.id))) : null, pf = frames?.size ? percentile(pool.map(e => frames.get(e.id)?.score)) : null;
   const share = e => q.attrs.length ? q.attrs.filter(a => e.attrs.includes(a)).length / q.attrs.length : null;
-  const rank = e => { const p = sim.has(e.id) ? pct(sim.get(e.id)) : 0, a = share(e); return a == null ? p : OPEN_VOCAB.imageWeight * p + (1 - OPEN_VOCAB.imageWeight) * a; };
-  return Object.assign(rank, { pass: e => (q.attrs.length > 0 && attrsOk(e)) || rank(e) >= OPEN_VOCAB.pass });
+  const rank = e => {
+    let s = 0, w = 0;
+    if (po) { s += W8.object * (sim.has(e.id) ? po(sim.get(e.id)) : 0); w += W8.object; }
+    if (pf) { s += W8.frame * (frames.has(e.id) ? pf(frames.get(e.id).score) : 0); w += W8.frame; }
+    const a = share(e);
+    if (a != null) { s += W8.labels * a; w += W8.labels; }
+    return w ? s / w : 0;
+  };
+  return Object.assign(rank, { pass: e => (q.attrs.length > 0 && attrsOk(e)) || rank(e) >= W8.pass });
 }
 
-export async function search(text, { scope = 'all', context = null, depth, onStage = () => {}, signal, speed = 1, verify = null, sim = null, labels = true } = {}) {
+export async function search(text, { scope = 'all', context = null, depth, onStage = () => {}, signal, speed = 1, verify = null, sim = null, frames = null, labels = true, weights = {} } = {}) {
   const t0 = Date.now();
   const refs = (await getMemory()).filter(r => camera(r.cameraId)), settings = await getSettings();
   const dk = DEPTHS[depth] ? depth : settings.depth, dp = DEPTHS[dk];
@@ -339,7 +353,10 @@ export async function search(text, { scope = 'all', context = null, depth, onSta
     funnel.push(s); onStage(s);
   };
 
-  const vocab = D.DEMO ? ATTRS : [...new Set([...ATTRS, ...D.events.flatMap(e => e.attrs)])];
+  // Attribute words are the ones the labels can contain: on real footage, words that occur in its labels. (The demo's
+  // vocabulary leaked in before: "jacket" became a required attribute no real label has, so "the person in a red
+  // jacket" matched nobody.) Other words are left to the image similarity.
+  const vocab = D.DEMO ? ATTRS : [...new Set(D.events.flatMap(e => e.attrs))];
   const q = interpret(text, refs, context, vocab);
   await step('interpreted', 'Query interpreted', null, { interp: q });
   if (q.location && !q.location.ref) return { status: 'clarify', interp: q, funnel };
@@ -354,7 +371,7 @@ export async function search(text, { scope = 'all', context = null, depth, onSta
   await step('retrieval', `Indexed segments across ${searched.length} camera${searched.length === 1 ? '' : 's'}`, Math.floor(coveredSec / 10));
 
   const pool = D.events.filter(e => searched.some(c => c.id === e.cameraId));
-  const rank = openVocab(pool, labels ? q : { ...q, attrs: [] }, sim);
+  const rank = openVocab(pool, labels ? q : { ...q, attrs: [] }, sim, frames, weights);
   const semantic = pool.filter(e => (!q.entity || e.entity === q.entity) && (!q.follow || e.track === q.follow.track) && rank.pass(e))
     .sort((a, b) => rank(b) - rank(a)).slice(0, dp.topK);
   await step('semantic', `Semantic matches · top ${dp.topK === 999 ? 'all' : dp.topK}`, semantic.length);
@@ -388,7 +405,9 @@ export async function search(text, { scope = 'all', context = null, depth, onSta
   for (const e of [...verified].sort((a, b) => rank(b) - rank(a))) if (!byTrack.has(e.track)) byTrack.set(e.track, e);
   const best = [...byTrack.values()];
   const diag = { depth: dk, cross: dp.cross, topK: dp.topK, pipeline: { ...settings.pipeline, onPrem: settings.privacy.onPrem }, retrieved: semantic.map(e => ({ id: e.id, score: +rank(e).toFixed(3), ...(sim?.has(e.id) ? { image: +sim.get(e.id).toFixed(3) } : {}) })), openVocab: !!sim?.size };
-  const base = { interp: q, window: win, scoped: scoped.map(c => c.id), coverage, rejected, funnel, diag, visual, ms: Date.now() - t0 };
+  // the moment each candidate best matches the query (clip time), when frame embeddings say so
+  const moments = frames?.size ? Object.fromEntries(semantic.filter(e => frames.has(e.id)).map(e => [e.id, frames.get(e.id).vt])) : undefined;
+  const base = { moments, interp: q, window: win, scoped: scoped.map(c => c.id), coverage, rejected, funnel, diag, visual, ms: Date.now() - t0 };
 
   let res;
   if (q.intent === 'journey' && (q.follow || best.length)) {

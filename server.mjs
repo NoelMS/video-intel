@@ -194,8 +194,9 @@ function liveStream(req, res, url) {
 }
 
 const runs = new Map(); // search id -> { events, done, listeners, ac }
-// ablation (evaluation only): { image: false } drops the image similarity, { labels: false } the label words,
-// { verify: false } the vision model's look at the top candidates. Defaults are the full pipeline.
+// ablation (evaluation only): { image: false } drops the object-crop similarity, { frames: false } the frame
+// similarity while each object is on screen, { labels: false } the label words, { verify: false } the vision model's
+// look at the top candidates. Defaults are the full pipeline.
 function startSearch({ text, scope = 'all', context = null, depth, ablation = {} }) {
   if (typeof ablation !== 'object' || !ablation) bad('ablation must be an object');
   if (typeof text !== 'string' || !text.trim() || text.length > 500) bad('text must be 1-500 characters');
@@ -205,8 +206,9 @@ function startSearch({ text, scope = 'all', context = null, depth, ablation = {}
   const id = Math.random().toString(36).slice(2, 10), run = { events: [], done: false, listeners: new Set(), ac: new AbortController() };
   const push = (type, data) => { run.events.push([type, data]); run.listeners.forEach(l => l(type, data)); if (type !== 'stage') run.done = true; };
   const real = api.ds().source === 'mine';   // real footage: no simulated stage delays, and the local model verifies
-  (real && ablation.image !== false ? baseline.objectSimilarities(text) : Promise.resolve(null)).then(sim => api.search(text, { scope, context, depth, signal: run.ac.signal, onStage: s => push('stage', s),
-    speed: real ? 0 : 1, sim, labels: ablation.labels !== false, verify: real && ablation.verify !== false ? (e, question) => indexer.verify(e, question) : null }))
+  (real ? baseline.similarities(text) : Promise.resolve(null)).then(sm => api.search(text, { scope, context, depth, signal: run.ac.signal, onStage: s => push('stage', s),
+    speed: real ? 0 : 1, sim: ablation.image !== false ? sm?.objects : null, frames: ablation.frames !== false ? sm?.frames : null,
+    labels: ablation.labels !== false, weights: ablation.weights && typeof ablation.weights === 'object' ? Object.fromEntries(Object.entries(ablation.weights).filter(([k, v]) => ['object', 'frame', 'labels', 'pass'].includes(k) && Number.isFinite(v))) : {}, verify: real && ablation.verify !== false ? (e, question) => indexer.verify(e, question) : null }))
     .then(r => push('result', r))
     .catch(e => push(e.name === 'AbortError' ? 'cancelled' : 'fail', { message: e.message }));
   runs.set(id, run);

@@ -18,11 +18,15 @@ const get = p => fetch(BASE + p).then(r => r.json());
 // What is compared. "labels" is the pipeline before open vocabulary (fixed label words only).
 const VARIANTS = {
   baseline: { label: 'Baseline: CLIP frame retrieval (1 frame/s)' },
-  labels: { label: 'Ours: detector + tracks + label words', ablation: { image: false, verify: false } },
-  image: { label: 'Ours: detector + tracks + object-crop CLIP', ablation: { labels: false, verify: false } },
-  hybrid: { label: 'Ours: + labels and object-crop CLIP (hybrid)', ablation: { verify: false } },
-  verified: { label: 'Ours: hybrid + vision-model verification (full)', ablation: {} },
+  labels: { label: 'Ours: detector + tracks + label words', ablation: { image: false, frames: false, verify: false } },
+  objects: { label: 'Ours: detector + tracks + object-crop CLIP', ablation: { labels: false, frames: false, verify: false } },
+  hybrid: { label: 'Ours: + label words (objects + labels)', ablation: { frames: false, verify: false } },
+  moments: { label: 'Ours: + frame context and moment per object', ablation: { verify: false } },
+  verified: { label: 'Ours: + vision-model verification (full)', ablation: {} },
 };
+// --weights '{"frame":0.2}' sets ranking weights for our variants (tuning on the dev split only)
+const WEIGHTS = JSON.parse(arg('weights', '{}'));
+for (const v of Object.values(VARIANTS)) if (v.ablation) v.ablation = { ...v.ablation, weights: WEIGHTS };
 const chosen = arg('variants', Object.keys(VARIANTS).join(',')).split(',');
 
 const queries = JSON.parse(readFileSync(join(here, 'queries.json'), 'utf8')).queries.filter(q => SPLIT === 'all' || q.split === SPLIT);
@@ -50,7 +54,7 @@ async function ours(text, ablation) {
   // the answer first (as shown), then the rest of the ranked candidates, best first
   const answer = r.primary ? [r.primary, ...(r.alternatives || [])] : [...(r.candidates || []), ...(r.more || []), ...(r.events || []), ...(r.journey?.sightings || [])];
   const list = [...new Set([...answer, ...(r.diag?.retrieved || []).map(x => x.id).filter(i => !rejected.has(i))])].filter(i => events[i]);
-  return { ms, list: list.slice(0, 10).map(i => ({ camera: camName[events[i].cameraId], time: at(events[i].vid, events[i].vt) })) };
+  return { ms, list: list.slice(0, 10).map(i => ({ camera: camName[events[i].cameraId], time: at(events[i].vid, r.moments?.[i] ?? events[i].vt) })) };
 }
 async function base(text) {
   const t0 = Date.now(), r = await post('baseline/search', { text, k: 10 });
