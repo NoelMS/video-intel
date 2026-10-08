@@ -514,3 +514,11 @@ dialog.intro { width: 100vw; height: 100vh; max-width: none; max-height: none; m
 .intro:is([data-step="4"], [data-step="5"]) .intro-link line { stroke-dashoffset: 0; }
 .intro[data-step="5"] .intro-answer { opacity: 1; transform: none; }
 @media (max-width: 680px) { .intro:is([data-step="4"], [data-step="5"]) .intro-stage { grid-template-columns: 1fr 24px 1fr; } }
+@media (max-width: 680px) {
+  .sys { flex-wrap: wrap; justify-content: flex-end; gap: 6px 12px; }
+  .mark { font-size: 13px; }
+  .sys-t, .diag-grid table, .lat { display: block; overflow-x: auto; }
+  .live-cams li { grid-template-columns: 56px 1fr 84px; } .live-cams li > :last-child { display: none; }
+  .watch-form .fld, .reg .fld { grid-template-columns: 1fr; }
+  .board .card-ctl select { max-width: 100%; }
+}

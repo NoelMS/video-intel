@@ -16,7 +16,7 @@ python -m http.server 8000      # static-only alternative: the in-browser mock b
 npm run check                   # asserts the §174 flows plus server validation/SSE/restart persistence
 ```
 
-The header shows `STORE SERVER` or `STORE BROWSER` so you can tell which backend is live. `service.js` decides at boot by probing `GET /api/health`.
+The header shows `STORE SERVER` or `STORE BROWSER` so you can tell which backend is live. `service.js` decides at boot from `<meta name="vi-backend" content="server">`, which `server.mjs` injects into `index.html` (no probe, so static hosting logs no 404). `GET /api/health` still exists for ops.
 
 ES modules need an http origin. Opening `index.html` from disk will not work.
 
@@ -65,6 +65,21 @@ ES modules need an http origin. Opening `index.html` from disk will not work.
 
 - **Opening sequence (§76)**: `introLayer`/`playIntro` is a scripted ~6 s demonstration labelled "DEMONSTRATION · scripted sequence on demo footage, not a live search". Steps are driven by `data-step` 0–5 with CSS transitions (query types, timeline brackets CAM 04, car grounds, CAM 06 links in, answer). It auto-plays once (`localStorage['vi.intro']`), replays from the landing link or palette, closes with Esc, and shows the final state only under reduced motion. "Run this search for real" runs the actual query. Test drivers should set `vi.intro=seen` before loading.
 
+- **Regression + mobile pass**: every §174 flow plus each feature page was verified in both STORE BROWSER (static) and STORE SERVER modes with zero console errors. At ≤680 px the header wraps, wide tables scroll inside themselves, and no page scrolls horizontally.
+
+## Verifying changes
+
+`npm run check` covers the logic and the server. For UI work, drive headless Chrome over CDP (no Playwright installed). The pattern used so far: launch `chrome --headless=new --remote-debugging-port`, set `localStorage vi.intro=seen`, run JS steps, capture screenshots, and collect `Runtime.exceptionThrown`, console errors and `Log.entryAdded`.
+
+## Known limits (deliberate; do not paper over)
+
+- All footage, detections and model scores are synthetic (`data.js`). `frame.js` draws SVG stand-ins; an event with `still`/`clip` URLs renders real media instead.
+- No indexer: registered cameras get real frame extraction but are never searchable.
+- Live mode is a replay of the recorded hour, not ingest.
+- No authentication: the operator role is a setting. A real deployment must bind roles to identities server-side (`addAudit` already enforces the role from settings).
+- Stage latencies include simulated delays (`DELAY` in `api.js`).
+- Query understanding is a keyword/regex interpreter (`interpret`). A real deployment swaps in an LLM or parser behind the same output shape.
+
 ## Next up
 
-Opening sequence.
+Feature-complete against the spec's deferred list. The next real step is a backend indexer: an embedding, detection and tracking pipeline that writes events in the `data.js` shape, then replacing `data.js` with `GET /cameras` and `/events` from that index.

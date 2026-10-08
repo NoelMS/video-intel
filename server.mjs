@@ -182,6 +182,8 @@ function serveStatic(res, path) {
   const file = join(root, rel);
   if (!file.startsWith(root + sep) || rel.split(/[\\/]/).some(p => p.startsWith('.')) || !existsSync(file) || !statSync(file).isFile()) throw new HttpError(404, 'Not found');
   res.writeHead(200, { 'content-type': MIME[extname(file)] || 'application/octet-stream' });
+  // Mark the page so the client uses this backend without probing (a probe would 404 on static hosting).
+  if (rel === 'index.html') return res.end(readFileSync(file, 'utf8').replace('<head>', '<head>\n  <meta name="vi-backend" content="server">'));
   createReadStream(file).pipe(res);
 }
 
