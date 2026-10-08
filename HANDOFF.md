@@ -11,6 +11,7 @@ A frontend for natural-language search over recorded multi-camera footage. It co
 ## Run
 
 ```
+Start.cmd                       # one click: ensures Node 18+, starts the server on a free port (8000+), opens the browser
 npm start                       # node server.mjs: static + REST + SSE, persists to .store/store.json (PORT, VI_STORE env)
 python -m http.server 8000      # static-only alternative: the in-browser mock backend is used, state in localStorage
 npm run check                   # asserts the §174 flows plus server validation/SSE/restart persistence
@@ -32,6 +33,7 @@ ES modules need an http origin. Opening `index.html` from disk will not work.
 | `service.js` | Backend selection: `{ api, mode }`. Pure helpers always from `api.js`, endpoints from `remote.js` when the server answers |
 | `remote.js` | fetch/EventSource client for `server.mjs`, same signatures as `api.js` endpoints |
 | `server.mjs` | Node (no deps): static files, `/api/*` REST, `POST /api/search` + `GET /api/search/:id/events` SSE, `DELETE /api/search/:id` cancels. Validates every write (trust boundary) |
+| `Start.cmd` / `start.ps1` | One-click launcher (Windows). Finds Node 18+ (PATH, Program Files, `.runtime`). If missing: `winget install OpenJS.NodeJS.LTS`, else a portable LTS zip into `.runtime\` verified against nodejs.org `SHASUMS256.txt` (no admin). Re-click while running just reopens the browser. `-Portable` forces the private runtime; `-NoBrowser` skips opening it. Closing the window stops the server |
 | `package.json` | `type: module`, `start`/`check` scripts. No dependencies |
 | `app.js` | UI: one state object `S`, string-template views, delegated `data-act` actions |
 | `check.mjs` | Flow assertions against `api.js` (node) |
@@ -66,6 +68,8 @@ ES modules need an http origin. Opening `index.html` from disk will not work.
 - **Opening sequence (§76)**: `introLayer`/`playIntro` is a scripted ~6 s demonstration labelled "DEMONSTRATION · scripted sequence on demo footage, not a live search". Steps are driven by `data-step` 0–5 with CSS transitions (query types, timeline brackets CAM 04, car grounds, CAM 06 links in, answer). It auto-plays once (`localStorage['vi.intro']`), replays from the landing link or palette, closes with Esc, and shows the final state only under reduced motion. "Run this search for real" runs the actual query. Test drivers should set `vi.intro=seen` before loading.
 
 - **Regression + mobile pass**: every §174 flow plus each feature page was verified in both STORE BROWSER (static) and STORE SERVER modes with zero console errors. At ≤680 px the header wraps, wide tables scroll inside themselves, and no page scrolls horizontally.
+
+- **One-click launcher**: `Start.cmd` → `start.ps1`. Tested: system Node, second click detecting the running server, and a forced portable download (v24.21.0, checksum verified). The winget path is not exercised in testing because it installs system-wide. PS 5.1 gotcha: assign `Invoke-RestMethod` JSON arrays to a variable before piping. `.cmd` files are kept CRLF via `.gitattributes`.
 
 ## Verifying changes
 
