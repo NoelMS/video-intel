@@ -1,7 +1,7 @@
 // Optional backend: static files + the §90 REST endpoints + SSE search stages, persisted to a JSON file.
 // No dependencies. `node server.mjs` (PORT, VI_STORE env vars optional).
 import { createServer } from 'node:http';
-import { readFileSync, writeFileSync, existsSync, mkdirSync, createReadStream, statSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, createReadStream, statSync, rmSync } from 'node:fs';
 import { join, normalize, dirname, extname, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
@@ -343,6 +343,16 @@ export function start(port = 0, storeFile = join(root, '.store', 'store.json'), 
         return sendFile(req, res, indexer.videoFile(v), VIDEO_MIME[extname(v.file)] || 'application/octet-stream');
       }
       if (req.method === 'GET' && (f = path.match(/^videos\/([\w-]+)\/frames\/(\d+)$/))) return sendFile(req, res, indexer.frameFile(f[1], +f[2]), 'image/jpeg');
+      // the answer's clip: dur seconds of the recording centred on t, as an MP4 download
+      if (req.method === 'GET' && (f = path.match(/^videos\/([\w-]+)\/clip$/))) {
+        const v = indexer.listVideos().find(x => x.id === f[1]), t = +url.searchParams.get('t'), dur = +(url.searchParams.get('dur') || 10);
+        if (!v) throw new HttpError(404, 'Not found');
+        if (!(t >= 0 && t <= v.duration) || !(dur >= 2 && dur <= 60)) bad('t must be inside the recording and dur 2-60 s');
+        const clip = await indexer.clip(v, t, dur);
+        res.on('close', () => rmSync(clip, { force: true }));
+        res.setHeader('content-disposition', `attachment; filename="${v.name.replace(/[^\w.-]+/g, '_')}_${Math.round(t)}s.mp4"`);
+        return sendFile(req, res, clip, 'video/mp4');
+      }
       await applySource();
       if (m && req.method === 'GET') return sse(res, m[1]);
       if (path === 'live' && req.method === 'GET') return liveStream(req, res, url);

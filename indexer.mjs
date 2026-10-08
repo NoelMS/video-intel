@@ -107,6 +107,14 @@ function kick() {
 }
 export const resume = kick;
 
+// dur seconds of a recording centred on t, re-encoded so it starts exactly there (a stream copy starts at a keyframe).
+export async function clip(v, t, dur) {
+  const out = join(dirs().videos, `${v.id}.clip-${Date.now()}.mp4`), from = Math.max(0, Math.min(t - dur / 2, v.duration - dur));
+  await run(setup.ffmpegPath(), ['-hide_banner', '-v', 'error', '-ss', from.toFixed(2), '-i', videoFile(v), '-t', String(dur), '-map', '0:v:0',
+    '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', '-an', '-y', out]);
+  return out;
+}
+
 async function index(v) {
   const fdir = join(dirs().frames, v.id);
   // 0. playback: H.264 copy when the browser cannot play the source (written to .tmp first so a cancel never leaves half a file)

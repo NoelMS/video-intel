@@ -118,6 +118,35 @@ const person = (n, t, x) => ({ n, t, lighting: 'good', objects: [{ type: 'person
 const tr = indexer.track([person(1, 0, 100), person(2, 2, 110), person(3, 4, 400), person(4, 30, 405)], 6);
 assert.deepEqual(tr.map(t => t.dets.map(d => d.n)), [[1, 2], [3], [4]], 'overlap links, a jump or a long gap starts a new track');
 
+// time phrases: ranges, "at" (+-5 min), parts of the day, and "last hour" measured back from the end of the footage
+{
+  const tw = t => api.timeWindow(` ${t} `);
+  assert.deepEqual(tw('person between 9 and 9:30'), { after: 32400, before: 34200 });
+  assert.deepEqual(tw('red car in the last hour'), { recent: 3600 });
+  assert.deepEqual(tw('in the last half hour'), { recent: 1800 });
+  assert.deepEqual(tw('anyone at 9:14'), { after: 32940, before: 33540 });
+  assert.deepEqual(tw('van after 9:40pm'), { after: 78000, before: null });
+  assert.deepEqual(tw('someone at the main gate'), { after: null, before: null }, '"at" a place is not a time');
+}
+// open vocabulary: the visual phrase CLIP sees, and the blend of image similarity with label words
+{
+  const { phrase } = await import('./baseline.mjs');
+  assert.equal(phrase('Did a red car pass through the main gate after 9:40?', ['Main Gate']), 'a photo of a red car');
+  assert.equal(phrase('Find the person carrying a large bag in the last hour'), 'a photo of the person carrying a large bag');
+  const ev = (id, attrs) => ({ id, attrs, conf: { semantic: 0.5, visual: 0.5 } }), pool = [ev('a', ['red']), ev('b', []), ev('c', ['red'])];
+  const q = { attrs: ['red'] }, sim = new Map([['a', 0.10], ['b', 0.30], ['c', 0.25]]), r = api.openVocab(pool, q, sim);
+  assert.ok(r(pool[2]) > r(pool[0]), 'among label matches, the better picture ranks first');
+  assert.ok(r.pass(pool[0]) && r.pass(pool[2]), 'a full label match always passes');
+  assert.ok(!api.openVocab(pool, q, null).pass(pool[1]), 'without embeddings, labels decide (as before)');
+  const nolabel = api.openVocab(pool, { attrs: [] }, sim);
+  assert.ok(nolabel.pass(pool[1]) && !nolabel.pass(pool[0]), 'words outside the vocabulary: the picture decides');
+}
+// CLIP tokenizer matches CLIP's ids (when the image-search model is installed)
+{
+  const setupM = await import('./setup.mjs'), E = await import('./embed.mjs');
+  if (setupM.detectorOk() && await E.load(setupM.DETECTOR_DIR)) assert.deepEqual(E.tokenize('a photo of a cat').slice(0, 8), [49406, 320, 1125, 539, 320, 2368, 49407, 0]);
+}
+
 // vision model replies: JSON in content (Ollama 0.40) or in thinking after reasoning (0.31), never the reasoning itself
 {
   const { jsonIn } = await import('./indexer.mjs');

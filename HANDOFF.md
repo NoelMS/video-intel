@@ -304,6 +304,11 @@ ES modules need an http origin. Opening `index.html` from disk will not work.
   - **Baseline** (`baseline.mjs`, `POST /api/baseline/search`): CLIP frame retrieval over the same footage (1 frame/s, cosine with the query text, top-k frames -> camera + time). No detection, tracking, labels, memory or verification. `phrase()` strips question words, time phrases and remembered place names ("did a red car pass the main gate after 9:40?" -> "a photo of a red car"); both paths use it.
   - **Open-vocabulary ranking** (`openVocab` in api.js): with embeddings, an object's query similarity, as a percentile among the searched objects, is blended with the share of the query's attribute words in its label (`OPEN_VOCAB.imageWeight` 0.5). It passes if all attribute words match or the blend is >= `OPEN_VOCAB.pass` (0.75). The server computes similarities (`objectSimilarities`) and passes `sim` into `search()`. The demo is unchanged. Weights are to be tuned on the dev split in phase 4.
 
+- **Phase 3: time phrases and answer clips**:
+  - `timeWindow()` (api.js) understands "between 9 and 9:30", "at 9:14" (+-5 min; "at the gate" is not a time), "since"/"until", "this morning/afternoon/evening", "tonight", and "in the last hour / past 20 minutes / last half hour". The last kind is `recent`, which `search()` measures back from the end of the footage.
+  - Answer clips: `GET /api/videos/:id/clip?t=&dur=` (2-60 s) re-encodes `dur` seconds centred on `t`, so the clip starts exactly there (verified: 4.000 s). It is served as an attachment and the temp file is removed afterwards. The evidence view has "Download clip (10 s)".
+  - check.mjs covers time phrases, `phrase()`, the open-vocab blend and the CLIP tokenizer ids.
+
 ## Footage sources (researched)
 
 Live feeds (for the live-ingest stretch goal; all free, check each licence before redistributing):

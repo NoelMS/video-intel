@@ -150,13 +150,24 @@ const ENTITY = {
   person: /\b(person|people|anyone|anybody|someone|somebody|who|man|woman|everyone|nobody)\b/,
 };
 const ATTRS = ['red', 'white', 'black', 'blue', 'grey', 'maroon', 'dark', 'sedan', 'van', 'suv', 'hatchback', 'bag', 'box', 'jacket', 'coat', 'large'];
-const clock = (lc, word) => {
-  const m = lc.match(new RegExp(`\\b${word} (\\d{1,2})(?::(\\d{2}))?\\s*(am|pm)?\\b`));
-  if (!m) return null;
-  let h = +m[1];
-  if (m[3] === 'pm' && h < 12) h += 12;
-  return h * 3600 + +(m[2] || 0) * 60;
-};
+const CLOCK = '(\\d{1,2})(?:[:.](\\d{2}))?\\s*(am|pm)?';
+const toSec = (h, m, ap) => { h = +h; if (ap === 'pm' && h < 12) h += 12; if (ap === 'am' && h === 12) h = 0; return h * 3600 + +(m || 0) * 60; };
+const clock = (lc, word) => { const m = lc.match(new RegExp(`\\b${word} ${CLOCK}\\b`)); return m ? toSec(m[1], m[2], m[3]) : null; };
+const PARTS = { morning: [6, 12], afternoon: [12, 17], evening: [17, 21], night: [20, 24] };
+// When: "after 9:40", "before 10pm", "since 9", "until 11", "between 9 and 9:30", "at 9:14" (+-5 min), "this morning",
+// and "in the last hour / past 20 minutes", which `recent` measures back from the end of the footage (search resolves it).
+export function timeWindow(lc) {
+  let m = lc.match(new RegExp(`\\bbetween ${CLOCK} and ${CLOCK}\\b`));
+  if (m) return { after: toSec(m[1], m[2], m[3] || m[6]), before: toSec(m[4], m[5], m[6]) };
+  m = lc.match(/\b(?:in )?the (?:last|past) (?:(\d+|half(?: an?)?|an?) )?(hours?|minutes?|mins?)\b/);
+  if (m) { const n = !m[1] || /^an?$/.test(m[1]) ? 1 : /^half/.test(m[1]) ? 0.5 : +m[1]; return { recent: n * (/^h/.test(m[2]) ? 3600 : 60) }; }
+  m = lc.match(new RegExp(`\\bat ${CLOCK}\\b`));
+  if (m && (m[2] || m[3])) { const at = toSec(m[1], m[2], m[3]); return { after: Math.max(0, at - 300), before: at + 300 }; }   // "at 9:14", not "at 3 cameras"
+  if (/\btonight\b/.test(lc)) return { after: PARTS.night[0] * 3600, before: PARTS.night[1] * 3600 };
+  const part = Object.keys(PARTS).find(k => new RegExp(`\\b(this|in the|at|last) ${k}\\b`).test(lc));
+  if (part) return { after: PARTS[part][0] * 3600, before: PARTS[part][1] * 3600 };
+  return { after: clock(lc, 'after') ?? clock(lc, 'since'), before: clock(lc, 'before') ?? clock(lc, 'until') };
+}
 
 // vocab: words that count as attributes. The demo uses ATTRS; real footage adds every word the vision model used.
 export function interpret(text, refs, context, vocab = ATTRS) {
@@ -175,7 +186,7 @@ export function interpret(text, refs, context, vocab = ATTRS) {
     text, entity, attrs, location, follow,
     crossing: /\b(pass(ed|es)?|through|enter(ed|s|ing)?|came in|went in)\b/.test(lc),
     intent: journey ? 'journey' : !entity && !attrs.length && !follow ? 'activity' : 'find',
-    after: clock(lc, 'after'), before: clock(lc, 'before'),
+    ...timeWindow(lc),
     yesNo: /^\s*(did|was|were|is|are|has|have)\b/.test(lc),
   };
 }
@@ -333,6 +344,7 @@ export async function search(text, { scope = 'all', context = null, depth, onSta
   await step('interpreted', 'Query interpreted', null, { interp: q });
   if (q.location && !q.location.ref) return { status: 'clarify', interp: q, funnel };
 
+  if (q.recent) Object.assign(q, { after: Math.max(W[0], W[1] - q.recent), before: W[1] });   // "in the last hour" of the footage
   const win = [q.after ?? W[0], q.before ?? W[1]];
   const scoped = D.cameras.filter(c => (scope === 'all' || c.id === scope) && (!q.location || c.id === q.location.ref.cameraId));
   const searched = scoped.filter(c => c.status !== 'offline');
