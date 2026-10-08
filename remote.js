@@ -1,6 +1,7 @@
 // Client for server.mjs. Same signatures as the endpoint functions in api.js.
 const j = async (path, { method = 'GET', body } = {}) => {
-  const r = await fetch('api/' + path, { method, headers: body ? { 'content-type': 'application/json' } : {}, body: body && JSON.stringify(body) });
+  // Every write is JSON, body or not: the server refuses a POST without a non-"simple" content type (CSRF guard).
+  const r = await fetch('api/' + path, { method, headers: method === 'GET' ? {} : { 'content-type': 'application/json' }, body: method === 'GET' ? undefined : JSON.stringify(body ?? {}) });
   const out = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(out.error || `${method} /api/${path} failed (${r.status})`);
   return out;

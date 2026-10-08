@@ -230,6 +230,16 @@ ES modules need an http origin. Opening `index.html` from disk will not work.
   - **Fix**: frames are now picked with `select` (the first real frame of each 1/rate slot) and keep their own timestamps; measured 0.000 s off on three clips.
   - **Older recordings**: those indexed before (no `exactTimes` on the video) are shifted by 0.5/sampling in `dataset()`. Re-indexing makes them exact.
 
+- **Capture now fixed, search usable during captures, no tracking gaps in still scenes**:
+  - **Capture now did nothing**: the browser's request had no body, so `remote.js` sent no content type, and the server's CSRF guard answers a POST without a JSON content type with 415. The handler's rejection was unhandled, so the button failed silently. The check-script test passed only because it always sent the header.
+    - Fix: `j()` sends JSON on every write, with or without a body.
+    - `app.js` now toasts any unhandled rejection (except cancelled searches), so a failing action says why.
+  - **Search "not working" while cameras capture**: each clip that finished indexing reloaded the dataset and re-rendered the page. That replaced the search box, so it lost focus mid-typing and later keystrokes went nowhere; the text survived in `S.query`, the cursor did not. `render()` now restores focus and the caret to the field with the same id. Searches themselves were fine during capture and indexing (measured 2-5 s).
+  - **Tracking stopped for seconds**: `mpdecimate` drops frames that barely differ from the last kept one. A Caltrans clip had 13 -> 22 s and 0 -> 8.5 s with no frames, so no detections, and parked cars lost their boxes until something moved. With the detector, frames are no longer dropped (a frame costs ~0.1 s). The vision-model-only path still drops them, where it saves seconds a frame.
+    - Measured on a 30 s Caltrans clip: 60 of 60 frames kept, a parked car tracked 0-29.5 s with 60 sightings, biggest gap 0.5 s.
+    - Clips indexed before this keep their gaps until re-indexed.
+  - **Verified** in the browser against a fresh test server: Capture now on a paused camera from the page, typing a search throughout the capture and indexing with focus kept, then the search returning matches.
+
 ## Footage sources (researched)
 
 Live feeds (for the live-ingest stretch goal; all free, check each licence before redistributing):

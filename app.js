@@ -1595,11 +1595,17 @@ if (matchMedia('(hover: hover) and (pointer: fine)').matches && !reduced.matches
 
 // ---------- render ----------
 const VIEWS = { live: liveView, search: searchView, cameras: camerasView, memory: memoryView, investigation: investigationView, system: systemView };
+// Background redraws (a clip finished indexing, live updates) rebuild the page, so the field being typed in keeps its
+// focus and caret: otherwise keystrokes after a redraw went nowhere and search seemed broken while cameras captured.
 function render() {
-  const y = scrollY;
+  const y = scrollY, a = document.activeElement, keep = a?.id && $('#app').contains(a) ? { id: a.id, s: a.selectionStart, e: a.selectionEnd } : null;
   $('#app').innerHTML = header() + `<main id="main" tabindex="-1">${VIEWS[S.view]()}</main>`;
   scrollTo(0, y);
+  const n = keep && document.getElementById(keep.id);
+  if (n) { n.focus({ preventScroll: true }); if (keep.s != null) try { n.setSelectionRange(keep.s, keep.e); } catch {} }
 }
+// An action that fails says so, instead of a button that silently does nothing.
+addEventListener('unhandledrejection', e => { if (e.reason?.name !== 'AbortError') toast(e.reason?.message || 'Something went wrong'); });
 
 try {
   await loadDataset();

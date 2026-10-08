@@ -116,7 +116,10 @@ async function index(v) {
     if (current.cancelled) return rmSync(tmp, { force: true });
     renameSync(tmp, playFile(v));
   }
-  // 1. frames: sample at rate() fps, drop near-identical frames (static CCTV), scale to 768 px wide
+  // 1. frames: sample at rate() fps, scale to 768 px wide. Without the detector, near-identical frames are dropped
+  // (mpdecimate): describing a static scene again costs seconds. With it they are kept: a frame costs ~0.1 s, and a
+  // dropped stretch had no detections, so parked cars lost their boxes until something moved (a 9 s gap in a
+  // Caltrans clip).
   const fast = !opts.describe && await detector.load(setup.DETECTOR_DIR);
   if (!existsSync(join(fdir, 'frames.json'))) {
     put({ ...v, status: 'extracting', progress: { done: 0, total: Math.round(v.duration) } });
@@ -127,7 +130,7 @@ async function index(v) {
     // 2 fps, measured by matching pixels): boxes ran ahead of the objects in playback.
     const r = rate();
     await run(setup.ffmpegPath(), ['-hide_banner', '-nostats', '-i', videoFile(v), '-an',
-      '-vf', `select='isnan(prev_selected_t)+gt(floor(t*${r}),floor(prev_selected_t*${r}))',mpdecimate,scale='min(768,iw)':-2,showinfo`, '-fps_mode', 'vfr', '-q:v', '4', join(fdir, '%06d.jpg')],
+      '-vf', `select='isnan(prev_selected_t)+gt(floor(t*${r}),floor(prev_selected_t*${r}))',${fast ? '' : 'mpdecimate,'}scale='min(768,iw)':-2,showinfo`, '-fps_mode', 'vfr', '-q:v', '4', join(fdir, '%06d.jpg')],
     line => {
       const m = line.match(/\bpts_time:\s*([\d.]+)/);
       if (m) { times.push(+m[1]); if (times.length % 10 === 0) put({ ...get(v.id), progress: { done: Math.round(+m[1]), total: Math.round(v.duration) } }); }
