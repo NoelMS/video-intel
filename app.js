@@ -1274,3 +1274,6 @@ function render() {
 S.registered = await api.getRegistered();
 render();
 if (S.view === 'search' && S.phase === 'idle') { let seen = 'seen'; try { seen = localStorage.getItem('vi.intro'); } catch {} if (!seen) playIntro(); }
+
+// Installable app (PWA); the worker only serves offline.html when the local server is down.
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});

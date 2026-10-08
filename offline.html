@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="data:,">
+  <title>Video Intelligence · not running</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #121211; color: #ebe6da; font: 16px/1.5 system-ui, sans-serif; }
+    main { max-width: 34rem; padding: 24px; }
+    main > svg { display: block; margin-bottom: 24px; }
+    p.k { font: 500 11px/1 ui-monospace, monospace; letter-spacing: .16em; color: #d8905e; margin: 0 0 14px; }
+    h1 { font-size: 32px; line-height: 1.1; letter-spacing: -.02em; margin: 0 0 14px; }
+    p { color: #b3ad9f; margin: 0 0 12px; }
+    code { color: #e0a84f; }
+    button { margin-top: 12px; font: 700 12px/1 system-ui, sans-serif; letter-spacing: .12em; text-transform: uppercase; padding: 10px 16px; background: #ebe6da; color: #121211; border: 0; border-radius: 2px; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <main>
+    <svg width="56" height="56" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">  <rect width="512" height="512" rx="104" fill="#121211"/>  <g fill="none" stroke="#e0a84f" stroke-width="22" stroke-linecap="square">    <path d="M136 196V136h60M316 136h60v60M376 316v60h-60M196 376h-60v-60"/>  </g>  <rect x="226" y="226" width="60" height="60" fill="#ebe6da" transform="rotate(45 256 256)"/></svg>
+    <p class="k">SERVER NOT RUNNING</p>
+    <h1>The local server isn't running.</h1>
+    <p>This app runs on your own computer. Double-click <code>Start.cmd</code> in the <code>video-intel</code> folder, then retry.</p>
+    <p>Keep the Start window open while you use the app; closing it stops the server.</p>
+    <button onclick="location.reload()">Retry</button>
+  </main>
+</body>
+</html>

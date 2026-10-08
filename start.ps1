@@ -14,6 +14,13 @@ function Find-Node {
   foreach ($c in $candidates) { if ($c -and (Test-Path $c) -and (Get-NodeMajor $c) -ge $MinNode) { return $c } }
 }
 
+# Open as a standalone app window (Edge ships with Windows; Chrome works too); else the default browser.
+function Open-App($url) {
+  $b = @("${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe", "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe",
+    "$env:ProgramFiles\Google\Chrome\Application\chrome.exe", "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
+  if ($b) { Start-Process $b "--app=$url" } else { Start-Process $url }
+}
+
 function Install-PortableNode {
   $index = Invoke-RestMethod 'https://nodejs.org/dist/index.json'  # assign first: PS 5.1 pipes a JSON array as one object
   $v = ($index | Where-Object { $_.lts } | Select-Object -First 1).version
@@ -53,7 +60,7 @@ for ($port = 8000; $port -lt 8020; $port++) {
 $url = "http://localhost:$(if ($running) { $running } else { $port })/"
 if ($running) {
   Write-Host "Already running at $url"
-  if (-not $NoBrowser) { Start-Process $url }
+  if (-not $NoBrowser) { Open-App $url }
   exit 0
 }
 
@@ -67,5 +74,5 @@ if (-not $ready) { Stop-Process $server.Id -Force; throw 'Server did not become 
 
 Write-Host "`nVideo Intelligence is running at $url"
 Write-Host 'Close this window (or press Ctrl+C) to stop it.'
-if (-not $NoBrowser) { Start-Process $url }
+if (-not $NoBrowser) { Open-App $url }
 Wait-Process $server.Id

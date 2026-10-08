@@ -34,6 +34,8 @@ ES modules need an http origin. Opening `index.html` from disk will not work.
 | `remote.js` | fetch/EventSource client for `server.mjs`, same signatures as `api.js` endpoints |
 | `server.mjs` | Node (no deps): static files, `/api/*` REST, `POST /api/search` + `GET /api/search/:id/events` SSE, `DELETE /api/search/:id` cancels. Validates every write (trust boundary) |
 | `Start.cmd` / `start.ps1` | One-click launcher (Windows). Finds Node 18+ (PATH, Program Files, `.runtime`). If missing: `winget install OpenJS.NodeJS.LTS`, else a portable LTS zip into `.runtime\` verified against nodejs.org `SHASUMS256.txt` (no admin). Re-click while running just reopens the browser. `-Portable` forces the private runtime; `-NoBrowser` skips opening it. Closing the window stops the server |
+| `manifest.webmanifest`, `icon.svg`, `icon-192.png`, `icon-512.png` | PWA install metadata. PNGs are rendered from `icon.svg` with headless Chrome (`--screenshot --default-background-color=00000000`) |
+| `sw.js`, `offline.html` | The service worker's only job: when a navigation fails (server down, e.g. app opened from its installed icon) it serves `offline.html`, which tells the user to run `Start.cmd`. It never caches the app or the API. Bump the cache name when `offline.html` changes |
 | `package.json` | `type: module`, `start`/`check` scripts. No dependencies |
 | `app.js` | UI: one state object `S`, string-template views, delegated `data-act` actions |
 | `check.mjs` | Flow assertions against `api.js` (node) |
@@ -70,6 +72,8 @@ ES modules need an http origin. Opening `index.html` from disk will not work.
 - **Regression + mobile pass**: every §174 flow plus each feature page was verified in both STORE BROWSER (static) and STORE SERVER modes with zero console errors. At ≤680 px the header wraps, wide tables scroll inside themselves, and no page scrolls horizontally.
 
 - **One-click launcher**: `Start.cmd` → `start.ps1`. Tested: system Node, second click detecting the running server, and a forced portable download (v24.21.0, checksum verified). The winget path is not exercised in testing because it installs system-wide. PS 5.1 gotcha: assign `Invoke-RestMethod` JSON arrays to a variable before piping. `.cmd` files are kept CRLF via `.gitattributes`.
+
+- **App window + PWA**: the launcher opens `--app=URL` in Edge (falling back to Chrome, then the default browser), so it runs as a standalone window. The app is installable (Chrome reports no `Page.getInstallabilityErrors`). The installed icon cannot start the server; `sw.js` covers that with the offline page. The installed app is tied to its origin (`http://localhost:8000`), and the launcher always prefers 8000.
 
 ## Verifying changes
 
