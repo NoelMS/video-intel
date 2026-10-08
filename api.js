@@ -50,7 +50,11 @@ export async function deleteMemory(id) {
 // Retention and expiry are enforced on read, so a stale record is never served as current.
 const ageDays = iso => (Date.now() - new Date(iso)) / 864e5;
 export const getHistory = async () => { const { privacy } = await getSettings(); return load('vi.history', []).filter(h => ageDays(h.at) <= privacy.retentionDays); };
-export const getSaved = async () => { const { privacy } = await getSettings(); return load('vi.saved', []).map(x => ({ ...x, expired: ageDays(x.savedAt) > privacy.expiryDays })); };
+// Saved items form the evidence board: { id, kind: 'event' | 'journey', eventId | track, lane, query, savedAt }. Array order = board order.
+export const LANES = { primary: 'Primary evidence', supporting: 'Supporting', context: 'Context', unsorted: 'Unsorted' };
+const norm = x => ({ kind: 'event', lane: 'unsorted', id: x.eventId, ...x }); // items saved before the board existed
+const savedRaw = () => load('vi.saved', []).map(norm);
+export const getSaved = async () => { const { privacy } = await getSettings(); return savedRaw().map(x => ({ ...x, expired: ageDays(x.savedAt) > privacy.expiryDays })); };
 export const getAudit = async () => load('vi.audit', []);
 export async function addAudit(entry) {
   if (entry.action === 'reveal' && (await getSettings()).operator.role !== 'supervisor')
@@ -61,11 +65,21 @@ export async function addAudit(entry) {
 }
 export const getNotes = async () => load('vi.notes', '');
 export const setNotes = async t => save('vi.notes', t);
-export async function saveEvidence(eventId, query) {
-  const s = load('vi.saved', []);
-  if (!s.some(x => x.eventId === eventId)) save('vi.saved', [...s, { eventId, query, savedAt: new Date().toISOString() }]);
+function addItem(item) {
+  const s = savedRaw();
+  if (!s.some(x => x.id === item.id)) save('vi.saved', [...s, { lane: 'unsorted', savedAt: new Date().toISOString(), ...item }]);
 }
-export const removeEvidence = async id => save('vi.saved', load('vi.saved', []).filter(x => x.eventId !== id));
+export const saveEvidence = async (eventId, query) => addItem({ id: eventId, kind: 'event', eventId, query });
+export const saveJourney = async (track, query) => addItem({ id: 'journey:' + track, kind: 'journey', track, query });
+export const removeEvidence = async id => save('vi.saved', savedRaw().filter(x => x.id !== id));
+export async function moveItem(id, lane, index) {
+  const all = savedRaw(), it = all.find(x => x.id === id);
+  if (!it || !LANES[lane]) return;
+  const rest = all.filter(x => x !== it), inLane = rest.filter(x => x.lane === lane);
+  const at = index < inLane.length ? rest.indexOf(inLane[Math.max(0, index)]) : inLane.length ? rest.indexOf(inLane.at(-1)) + 1 : rest.length;
+  rest.splice(at, 0, { ...it, lane });
+  save('vi.saved', rest);
+}
 
 // GET/PUT /settings. Model identifiers are recorded for provenance; the demo pipeline runs no models.
 export const DEPTHS = {

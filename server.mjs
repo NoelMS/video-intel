@@ -132,8 +132,18 @@ const routes = [
   ['DELETE', /^memory\/([\w-]+)$/, async (_, [id]) => { await api.deleteMemory(id); return { ok: true }; }],
   ['GET', /^history$/, () => api.getHistory()],
   ['GET', /^saved$/, () => api.getSaved()],
-  ['POST', /^saved$/, async req => { const b = await body(req); if (!api.event(b.eventId)) bad('unknown eventId'); await api.saveEvidence(b.eventId, String(b.query ?? '').slice(0, 500)); return { ok: true }; }],
-  ['DELETE', /^saved\/([\w-]+)$/, async (_, [id]) => { await api.removeEvidence(id); return { ok: true }; }],
+  ['POST', /^saved$/, async req => {
+    const b = await body(req), q = String(b.query ?? '').slice(0, 500);
+    if (b.track != null) { if (!api.object(b.track).name) bad('unknown track'); await api.saveJourney(b.track, q); }
+    else { if (!api.event(b.eventId)) bad('unknown eventId'); await api.saveEvidence(b.eventId, q); }
+    return { ok: true };
+  }],
+  ['PUT', /^saved\/([\w:%-]+)$/, async (req, [id]) => {
+    const b = await body(req);
+    if (!api.LANES[b.lane] || !Number.isInteger(b.index) || b.index < 0) bad('lane must be a known lane and index a non-negative integer');
+    await api.moveItem(decodeURIComponent(id), b.lane, b.index); return { ok: true };
+  }],
+  ['DELETE', /^saved\/([\w:%-]+)$/, async (_, [id]) => { await api.removeEvidence(decodeURIComponent(id)); return { ok: true }; }],
   ['GET', /^notes$/, async () => ({ text: await api.getNotes() })],
   ['PUT', /^notes$/, async req => { const b = await body(req); if (typeof b.text !== 'string' || b.text.length > 20000) bad('text must be a string under 20k'); await api.setNotes(b.text); return { ok: true }; }],
   ['GET', /^settings$/, () => api.getSettings()],

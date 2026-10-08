@@ -274,10 +274,6 @@ td:first-child, th:first-child { padding-left: 0; }
 .ref-item h2 { font-size: 32px; letter-spacing: -.025em; margin-bottom: 4px; }
 .ref-item > div > .mono { font-size: 11.5px; margin-bottom: 18px; }
 .nb { display: grid; grid-template-columns: 1.6fr 1fr; gap: 56px; }
-.sheets { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 24px; margin-bottom: 40px; }
-.sheet { border-top: 2px solid var(--line-strong); padding-top: 10px; display: grid; gap: 4px; font-size: 14px; }
-.sheet > button:first-child { border: 1px solid var(--line); margin-bottom: 6px; }
-.sheet .t { color: var(--accent); font-size: 12px; } .sheet .mono.dim { font-size: 11px; } .sheet .txt { justify-self: start; font-size: 12px; }
 #notes { width: 100%; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r1); padding: 14px; line-height: 1.6; }
 .hist button { display: grid; gap: 2px; width: 100%; padding: 12px 0; border-bottom: 1px solid var(--line); }
 .hist button:hover span:first-child { color: var(--accent); }
@@ -418,7 +414,6 @@ dialog.palette { width: min(640px, 92vw); margin-top: 12vh; padding: 0; }
 @media (max-width: 1080px) { .diag-grid { grid-template-columns: 1fr; } .fld { grid-template-columns: 1fr; gap: 4px; } }
 .sys > * { white-space: nowrap; }
 @media (max-width: 1440px) { .sys .dim { display: none; } }
-.sheet.expired > button:first-of-type { opacity: .45; }
 .audit { margin-top: 56px; max-width: 880px; }
 .audit li { display: grid; grid-template-columns: 200px 90px 110px 1fr; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 12px; align-items: baseline; }
 
@@ -465,3 +460,26 @@ dialog.palette { width: min(640px, 92vw); margin-top: 12vh; padding: 0; }
 .reattach input { display: block; margin-top: 6px; font-size: 12px; }
 .src-video { width: 100%; max-height: 70vh; background: #000; display: block; margin-bottom: 10px; }
 @media (max-width: 1080px) { .reg-item { grid-template-columns: 1fr; } .reg .fld { grid-template-columns: 1fr; } .reg .fld .dim { grid-column: 1; } }
+
+/* evidence board */
+.page-h > .acts { grid-column: 2; grid-row: 1 / span 3; margin: 0; align-self: end; }
+.board { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px; margin-bottom: 56px; align-items: start; }
+.lane { min-height: 220px; border-top: 2px solid var(--line-strong); padding-top: 12px; transition: background var(--fast); }
+.lane[data-lane=primary] { border-top-color: var(--accent); }
+.lane.over { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+.lane ol { display: grid; gap: 14px; }
+.drop-hint { border: 1px dashed var(--line-strong); padding: 28px 10px; text-align: center; font-size: 11px; }
+.card { border: 1px solid var(--line); background: var(--surface); padding: 10px; display: grid; gap: 4px; font-size: 13.5px; cursor: grab; }
+.card.dragging { opacity: .4; }
+.card.expired .card-frame, .card.expired .jstrip { opacity: .45; }
+.card .t { color: var(--accent); font-size: 11.5px; margin-top: 4px; }
+.card .mono.dim { font-size: 10.5px; }
+.card-frame { display: block; border: 1px solid var(--line); }
+.jstrip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 3px; }
+.jstrip button { border: 1px solid var(--line); }
+.card-ctl { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; margin-top: 6px; padding-top: 8px; border-top: 1px solid var(--line); font-size: 12px; }
+.card-ctl select { font-size: 11px; padding: 2px 4px; max-width: 130px; }
+.card-ctl .txt { font-size: 12px; }
+.cmp { display: inline-flex; gap: 4px; align-items: center; color: var(--text-2); }
+@media (max-width: 1080px) { .board { grid-template-columns: 1fr 1fr; } .page-h > .acts { grid-column: 1; grid-row: auto; margin-top: 14px; } }
+@media (max-width: 680px) { .board { grid-template-columns: 1fr; } }

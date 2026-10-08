@@ -268,7 +268,7 @@ function journeyResult(r) {
     <div role="tabpanel">${S.jtab === 'topology' ? topology(j) : S.jtab === 'timeline' ? timeline({ hits: new Set(j.sightings), focus: a }) : sequence(j, a.id)}</div>
     ${r.alternatives.length ? `<section class="alts"><p class="eyebrow">NOT FOLLOWED</p>${r.alternatives.map(id => { const e = ev(id);
       return `<div class="alt"><span>${esc(name(e))}</span> ${evRef(e)} <button class="txt" data-act="compare" data-ids="${a.id},${id}">Compare</button> <button class="txt" data-act="follow" data-track="${e.track}">Follow instead</button></div>`; }).join('')}</section>` : ''}
-    <div class="acts"><button class="btn" data-act="passport" data-track="${j.track}">Object passport</button></div>
+    <div class="acts"><button class="btn" data-act="passport" data-track="${j.track}">Object passport</button><button class="txt" data-act="pin-journey" data-track="${j.track}">Pin journey to board</button></div>
     ${coverage(r)}
   </article>`;
 }
@@ -429,16 +429,46 @@ function memoryView() {
         <button class="txt" data-act="redefine" data-id="${r.id}">Redefine</button><button class="txt danger" data-act="forget" data-id="${r.id}">Forget</button></div></div></li>`; }).join('')}</ol></section>`;
 }
 
+// ---------- evidence board (§63) + multi-frame comparison (§55) ----------
+const picked = new Set();
+function boardCard(x) {
+  const lanes = Object.entries(api.LANES);
+  const body = x.kind === 'journey' ? (() => { const j = api.journey(x.track), s = j.sightings.map(ev);
+    return `<div class="jstrip">${s.map(e => `<button data-act="open" data-id="${e.id}" aria-label="Open ${cam(e.cameraId).code} ${e.time}">${still(e, { crop: true })}</button>`).join('')}</div>
+      <p class="t mono">JOURNEY · TRACK ${x.track}</p><p>${esc(tracks[x.track])}</p>
+      <p class="mono dim">${s.map(e => cam(e.cameraId).code).join(' → ')} · ${s[0].time.slice(0, 5)}–${s.at(-1).time.slice(0, 5)}</p>
+      <button class="txt" data-act="follow" data-track="${x.track}">Open journey</button>`; })()
+    : (() => { const e = ev(x.eventId), c = cam(e.cameraId);
+    return `<button class="card-frame" data-act="open" data-id="${e.id}" aria-label="Open ${c.code} ${e.time}">${still(e)}</button>
+      <p class="t mono">${c.code} · ${e.time} ${TZ}</p><p>${esc(e.label)}</p>`; })();
+  return `<li class="card ${x.expired ? 'expired' : ''}" draggable="true" data-card="${esc(x.id)}" data-lane-of="${x.lane}">
+    ${x.expired ? `<p class="warn mono">EXPIRED · excluded from export</p>` : ''}${body}
+    <p class="mono dim">from “${esc(x.query || 'archive')}”</p>
+    <div class="card-ctl">
+      <select data-move="${esc(x.id)}" aria-label="Move to lane">${lanes.map(([k, l]) => `<option value="${k}" ${x.lane === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
+      <button class="txt" data-act="nudge" data-id="${esc(x.id)}" data-d="-1" aria-label="Move earlier">↑</button><button class="txt" data-act="nudge" data-id="${esc(x.id)}" data-d="1" aria-label="Move later">↓</button>
+      ${x.kind === 'event' ? `<label class="cmp"><input type="checkbox" data-pick="${x.eventId}" ${picked.has(x.eventId) ? 'checked' : ''}> Compare</label>` : ''}
+      <button class="txt danger" data-act="unsave" data-id="${esc(x.id)}">Remove</button></div></li>`;
+}
+
+async function moveCard(id, lane, index) {
+  await api.moveItem(id, lane, Math.max(0, index));
+  S.saved = await api.getSaved(); render();
+  $(`[data-card="${CSS.escape(id)}"] select`)?.focus();
+}
+
 function investigationView() {
-  return `<section class="page"><header class="page-h"><p class="eyebrow">INVESTIGATION</p><h1>Notebook.</h1>
-    <p class="lede">${S.saved.length} saved evidence · ${S.history.length} searches. Stored ${mode === 'server' ? 'on the server' : 'in this browser'}.</p>
-    <button class="btn" data-act="export" ${!S.saved.some(x => !x.expired) || exportBlock() ? `disabled title="${exportBlock() ?? 'No unexpired evidence'}"` : ''}>Export evidence package</button></header>
-    <div class="nb"><section><p class="eyebrow">EVIDENCE</p>
-      ${S.saved.length ? `<ol class="sheets">${S.saved.map(x => { const e = ev(x.eventId), c = cam(e.cameraId); return `<li class="sheet ${x.expired ? 'expired' : ''}">
-        ${x.expired ? `<p class="warn mono">EXPIRED · older than ${S.settings.privacy.expiryDays} days, excluded from export</p>` : ''}
-        <button data-act="open" data-id="${e.id}" aria-label="Open ${c.code} ${e.time}">${still(e)}</button>
-        <p class="t mono">${c.code} · ${e.time} ${TZ}</p><p>${esc(e.label)}</p><p class="mono dim">from “${esc(x.query || 'archive')}”</p>
-        <button class="txt" data-act="unsave" data-id="${e.id}">Remove</button></li>`; }).join('')}</ol>` : '<p class="dim">Nothing saved yet. Use “Save evidence” in any evidence view.</p>'}
+  const exportable = S.saved.some(x => !x.expired);
+  return `<section class="page"><header class="page-h"><p class="eyebrow">INVESTIGATION</p><h1>Evidence board.</h1>
+    <p class="lede">${S.saved.length} item${S.saved.length === 1 ? '' : 's'} · ${S.history.length} searches. Drag cards between lanes, or use each card's lane menu and arrows. Stored ${mode === 'server' ? 'on the server' : 'in this browser'}.</p>
+    <div class="acts">
+      <button class="btn" data-act="compare-picked" ${picked.size < 2 ? 'disabled title="Tick Compare on two or more frames"' : ''}>Compare selected (${picked.size})</button>
+      <button class="btn primary" data-act="export" ${!exportable || exportBlock() ? `disabled title="${exportBlock() ?? 'No unexpired evidence'}"` : ''}>Export evidence package</button></div></header>
+    ${S.saved.length ? `<div class="board">${Object.entries(api.LANES).map(([k, l]) => { const items = S.saved.filter(x => x.lane === k);
+      return `<section class="lane" data-lane="${k}" aria-label="${l}"><p class="eyebrow">${l} <span class="dim">${items.length}</span></p>
+        <ol>${items.map(boardCard).join('')}</ol>${items.length ? '' : '<p class="drop-hint mono dim">Drop here</p>'}</section>`; }).join('')}</div>`
+      : '<p class="dim">Nothing saved yet. Use “Save evidence” in any evidence view, or “Pin journey” on a journey.</p>'}
+    <div class="nb"><section>
       <label class="eyebrow" for="notes">NOTES</label><textarea id="notes" rows="6">${esc(S.notes)}</textarea></section>
     <section><p class="eyebrow">HISTORY</p><ol class="hist">${S.history.map(h => `<li><button data-act="ask" data-q="${esc(h.text)}"><span>“${esc(h.text)}”</span>
       <span class="mono dim">${new Date(h.at).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })} · ${STATUS[h.status]} · ${h.n} evidence event${h.n === 1 ? '' : 's'}</span></button></li>`).join('') || '<li class="dim">No searches yet.</li>'}</ol></section></div></section>`;
@@ -598,7 +628,7 @@ function passportLayer({ track }) {
       <div><dt>Sightings</dt><dd>${s.length}</dd></div><div><dt>Cross-camera continuity</dt><dd>${o.transitions.length} transition${o.transitions.length === 1 ? '' : 's'}${o.transitions.length ? ' · ' + o.transitions.map(t => t.strength).join(', ') : ''}</dd></div></dl>
     <ol class="pp">${s.map(e => `<li><button data-act="open" data-id="${e.id}" aria-label="Open ${cam(e.cameraId).code} ${e.time}">${still(e, { crop: true })}</button><span class="mono">${cam(e.cameraId).code} · ${e.time}</span></li>`).join('')}</ol>
     ${maskable({ entity: o.entity }) && !S.reveal ? `<p class="mono dim">${o.entity === 'person' ? 'Faces' : 'Plates'} masked by privacy setting.</p>` : ''}
-    <div class="acts"><button class="btn" data-act="follow" data-track="${track}">Open journey</button></div>`;
+    <div class="acts"><button class="btn" data-act="follow" data-track="${track}">Open journey</button><button class="txt" data-act="pin-journey" data-track="${track}">Pin journey to board</button></div>`;
 }
 
 // ---------- import + registration (§116-118) ----------
@@ -978,11 +1008,19 @@ async function run(text) {
 async function exportPackage(only) {
   const why = exportBlock();
   if (why) return toast(why);
-  const items = only ? [{ eventId: only, query: S.query }] : S.saved.filter(x => !x.expired), p = S.settings.privacy;
+  const items = only ? [{ kind: 'event', eventId: only, query: S.query, lane: 'primary' }] : S.saved.filter(x => !x.expired), p = S.settings.privacy;
   const out = ['# Case evidence', '', DEMO ? '> DEMO DATA: synthetic footage and detections. Not real evidence.\n' : '',
     p.exports === 'watermarked' ? `> RESTRICTED · exported by role "${S.settings.operator.role}" on ${new Date().toISOString()} · do not redistribute\n` : '',
     `Generated ${new Date().toISOString()} · faces ${p.faces ? 'masked' : 'unmasked'} · plates ${p.plates ? 'masked' : 'unmasked'}`, ''];
-  for (const x of items) {
+  let lane;
+  for (const x of [...items].sort((a, b) => Object.keys(api.LANES).indexOf(a.lane) - Object.keys(api.LANES).indexOf(b.lane))) {
+    if (!only && x.lane !== lane) out.push(`# ${api.LANES[lane = x.lane]}`, '');
+    if (x.kind === 'journey') {
+      const j = api.journey(x.track);
+      out.push(`## Journey · track ${x.track} · ${tracks[x.track]}`, `- Query: "${x.query || '-'}"`,
+        ...j.sightings.map((id, i) => `- ${cam(ev(id).cameraId).code} ${ev(id).time} ${TZ}${i ? ` (${STRENGTH[j.transitions[i - 1].strength].toLowerCase()}, +${dur(j.transitions[i - 1].gap)})` : ''}`), '');
+      continue;
+    }
     const e = ev(x.eventId), c = cam(e.cameraId), j = api.journey(e.track);
     out.push(`## ${c.code} · ${e.time} ${TZ} · ${e.label}`, `- Camera: ${c.code} ${c.name} (clock offset ${fmtSync(c.sync)})`, `- Source clip: ${clipName(e)}`,
       `- Object: ${name(e)} · track ${e.track}`, `- Query: "${x.query || '-'}"`, `- Assessment: ${api.assess(e).map(([k, v]) => `${k} ${v}`).join(' · ')}`,
@@ -992,6 +1030,7 @@ async function exportPackage(only) {
   const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([out.join('\n')], { type: 'text/markdown' })), download: `evidence-${DAY}.md` });
   a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   toast(`Evidence package ready · ${items.length} item${items.length === 1 ? '' : 's'}`);
+  if (!only && S.saved.some(x => x.expired)) toast(`${S.saved.filter(x => x.expired).length} expired item(s) left out`);
 }
 
 function toast(msg) {
@@ -1014,6 +1053,9 @@ function cycleTheme() {
 
 const ACT = {
   theme: cycleTheme,
+  'pin-journey': async d => { await api.saveJourney(d.track, S.query); S.saved = await api.getSaved(); toast('Journey pinned to the evidence board'); },
+  nudge: d => { const x = S.saved.find(i => i.id === d.id), lane = S.saved.filter(i => i.lane === x.lane); moveCard(d.id, x.lane, lane.indexOf(x) + +d.d); },
+  'compare-picked': () => openLayer({ kind: 'compare', ids: [...picked] }),
   register: () => openLayer({ kind: 'register' }),
   'play-reg': d => openLayer({ kind: 'video', id: d.id }),
   unregister: async d => {
@@ -1033,7 +1075,7 @@ const ACT = {
   compare: d => openLayer({ kind: 'compare', ids: d.ids.split(',') }), bridge: d => openLayer({ kind: 'compare', ids: [d.from, d.to], bridge: true }),
   passport: d => openLayer({ kind: 'passport', track: d.track }), follow: d => follow(d.track), jtab: d => set({ jtab: d.tab }),
   save: async d => { await api.saveEvidence(d.id, S.query); S.saved = await api.getSaved(); toast('Evidence saved to investigation'); },
-  unsave: async d => { await api.removeEvidence(d.id); S.saved = await api.getSaved(); render(); },
+  unsave: async d => { await api.removeEvidence(d.id); picked.delete(d.id); S.saved = await api.getSaved(); render(); },
   export: () => exportPackage(), exportone: d => exportPackage(d.id),
   camera: d => { S.camFocus = d.id; go('cameras'); $('#row-' + d.id)?.scrollIntoView({ block: 'center' }); },
   scope: d => { S.scope = d.id; go('search'); focusQ(); },
@@ -1086,6 +1128,8 @@ document.addEventListener('change', e => {
   const t = e.target;
   if (t.id === 'speed') P.speed = +t.value;
   else if (t.id === 'live-speed') S.live.speed = +t.value;
+  else if (t.dataset.move) moveCard(t.dataset.move, t.value, 999);
+  else if (t.dataset.pick) { t.checked ? picked.add(t.dataset.pick) : picked.delete(t.dataset.pick); render(); $(`[data-pick="${t.dataset.pick}"]`)?.focus(); }
   else if (t.dataset.reattach && t.files[0]) {
     const r = S.registered.find(x => x.id === t.dataset.reattach), f = t.files[0];
     if (f.name !== r.source.name || f.size !== r.source.size) toast(`Attached ${f.name}; it differs from the registered ${r.source.name}`);
@@ -1093,6 +1137,23 @@ document.addEventListener('change', e => {
   }
   else if (t.dataset.tog) { P[t.dataset.tog] = t.checked; drawFrame(); }
   else if (t.name === 'scope') S.scope = t.value;
+});
+
+// Evidence board drag and drop (keyboard equivalent: each card's lane menu and arrows).
+document.addEventListener('dragstart', e => {
+  const c = e.target.closest?.('[data-card]');
+  if (!c) return;
+  e.dataTransfer.setData('text/plain', c.dataset.card); e.dataTransfer.effectAllowed = 'move'; c.classList.add('dragging');
+});
+document.addEventListener('dragend', e => e.target.closest?.('[data-card]')?.classList.remove('dragging'));
+document.addEventListener('dragover', e => { const l = e.target.closest?.('[data-lane]'); if (!l) return; e.preventDefault(); $$('.lane.over').forEach(x => x !== l && x.classList.remove('over')); l.classList.add('over'); });
+document.addEventListener('drop', e => {
+  const l = e.target.closest?.('[data-lane]');
+  if (!l) return;
+  e.preventDefault(); l.classList.remove('over');
+  const id = e.dataTransfer.getData('text/plain'), before = e.target.closest('[data-card]');
+  const order = $$('[data-card]', l).map(x => x.dataset.card).filter(x => x !== id);
+  moveCard(id, l.dataset.lane, before && before.dataset.card !== id ? order.indexOf(before.dataset.card) : order.length);
 });
 
 // Region drawing on the resolver canvas.
@@ -1150,7 +1211,7 @@ document.addEventListener('keydown', e => {
 
 // Contextual cursor label (desktop, fine pointer, motion allowed only). Native cursor stays visible.
 const CURSOR = [['[data-draw]', 'DRAW'], ['#scrub, .tl-ticks', 'SCRUB'], ['.crop, .sight-frame, .cand-frame', 'INSPECT'], ['[data-act=camera], [data-act=res-cam]', 'OPEN'],
-  ['[data-act=compare], [data-act=bridge]', 'COMPARE'], ['.lead, .thumb, .hood button, .mk, .consist button, .pp button, .sheet > button', 'VIEW']];
+  ['[data-act=compare], [data-act=bridge], [data-act=compare-picked]', 'COMPARE'], ['[data-card]', 'MOVE'], ['.lead, .thumb, .hood button, .mk, .consist button, .pp button, .card-frame, .jstrip button', 'VIEW']];
 if (matchMedia('(hover: hover) and (pointer: fine)').matches && !reduced.matches) {
   const cur = $('#cursor');
   addEventListener('pointermove', e => {

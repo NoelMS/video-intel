@@ -57,6 +57,13 @@ assert.equal(again.length, 0, 'no duplicate alerts on replay');
 assert.equal(api.matchWatch({ text: 'Anyone at the east dock', scope: 'all', from: '00:00', to: '23:59' }, api.event('ev_091412'), await api.getMemory()), null);
 assert.equal(api.inSchedule(api.sec('23:00:00'), { from: '20:00', to: '06:00' }), true);
 
+// §63 evidence board ordering
+await api.saveEvidence('ev_091548', 'q'); await api.saveJourney('A17', 'q'); await api.saveEvidence('ev_092630', 'q');
+await api.moveItem('journey:A17', 'primary', 0); await api.moveItem('ev_092630', 'primary', 0); await api.moveItem('ev_091548', 'primary', 5);
+assert.deepEqual((await api.getSaved()).filter(x => x.lane === 'primary').map(x => x.id), ['ev_092630', 'journey:A17', 'ev_091548']);
+await api.removeEvidence('journey:A17');
+assert.ok(!(await api.getSaved()).some(x => x.id === 'journey:A17'));
+
 // server: persistence + validation + SSE stages
 const { start } = await import('./server.mjs');
 const { tmpdir } = await import('node:os');
@@ -78,6 +85,9 @@ assert.equal((await call('registrations', 'POST', { ...reg, thumbs: ['data:text/
 assert.equal((await call('registrations', 'POST', { ...reg, source: { kind: 'url', url: 'javascript:alert(1)' } }))[0], 400);
 const [okReg, row] = await call('registrations', 'POST', reg);
 assert.equal(okReg, 200); assert.equal(row.status, 'frames-extracted');
+assert.equal((await call('saved', 'POST', { track: 'A17' }))[0], 200);
+assert.equal((await call('saved/journey%3AA17', 'PUT', { lane: 'primary', index: 0 }))[0], 200);
+assert.equal((await call('saved/journey%3AA17', 'PUT', { lane: 'nowhere', index: 0 }))[0], 400);
 const liveText = await (await fetch(base + 'live?speed=3600')).text();
 assert.match(liveText, /event: alert/); assert.match(liveText, /event: end/);
 srv.close();

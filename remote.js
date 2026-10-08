@@ -15,7 +15,9 @@ export const deleteMemory = id => j('memory/' + id, { method: 'DELETE' });
 export const getHistory = () => j('history');
 export const getSaved = () => j('saved');
 export const saveEvidence = (eventId, query) => j('saved', { method: 'POST', body: { eventId, query } });
-export const removeEvidence = id => j('saved/' + id, { method: 'DELETE' });
+export const saveJourney = (track, query) => j('saved', { method: 'POST', body: { track, query } });
+export const removeEvidence = id => j('saved/' + encodeURIComponent(id), { method: 'DELETE' });
+export const moveItem = (id, lane, index) => j('saved/' + encodeURIComponent(id), { method: 'PUT', body: { lane, index } });
 export const getNotes = async () => (await j('notes')).text;
 export const setNotes = text => j('notes', { method: 'PUT', body: { text } });
 
