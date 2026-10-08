@@ -207,6 +207,16 @@ export function assess(e, q, { cross = true } = {}) {
   ];
 }
 
+// ---------- camera registration (§117-118). Registered cameras are not searchable until an indexer runs. ----------
+export const getRegistered = async () => load('vi.registered', []);
+export async function registerCamera(c) {
+  const row = { id: 'reg_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), registered: new Date().toISOString(), ...c,
+    status: c.source.kind === 'file' ? 'frames-extracted' : 'awaiting-ingest' };
+  save('vi.registered', [...load('vi.registered', []), row]);
+  return row;
+}
+export const deleteRegistered = async id => save('vi.registered', load('vi.registered', []).filter(r => r.id !== id));
+
 // ---------- standing queries (§33), alerts (§34), live replay (§32) ----------
 const SEED_WATCHES = [
   { id: 'w_rear', text: 'Anyone entering the rear entrance', scope: 'all', from: '09:30', to: '10:00', status: 'active', created: '2026-10-05' },

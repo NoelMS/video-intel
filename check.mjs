@@ -72,6 +72,12 @@ assert.match(sse, /event: stage/); assert.match(sse, /event: result\ndata: .*"st
 assert.equal((await call('audit', 'POST', { action: 'reveal', eventId: 'ev_091412' }))[0], 403, 'analyst cannot reveal');
 assert.equal((await call('settings', 'PUT', { privacy: { exports: 'leak' } }))[0], 400);
 assert.equal((await call('watches', 'POST', { text: 'x', scope: 'all', from: '25:00', to: '06:00' }))[0], 400, 'bad schedule rejected');
+const reg = { name: 'Dock East', location: 'Warehouse', tz: 'Asia/Kolkata', source: { kind: 'file', name: 'a.mp4', size: 10, type: 'video/mp4' }, start: '2026-10-08T09:00:00Z' };
+assert.equal((await call('registrations', 'POST', { ...reg, tz: 'Mars/Olympus' }))[0], 400, 'bad timezone rejected');
+assert.equal((await call('registrations', 'POST', { ...reg, thumbs: ['data:text/html,<script>'] }))[0], 400, 'non-jpeg thumb rejected');
+assert.equal((await call('registrations', 'POST', { ...reg, source: { kind: 'url', url: 'javascript:alert(1)' } }))[0], 400);
+const [okReg, row] = await call('registrations', 'POST', reg);
+assert.equal(okReg, 200); assert.equal(row.status, 'frames-extracted');
 const liveText = await (await fetch(base + 'live?speed=3600')).text();
 assert.match(liveText, /event: alert/); assert.match(liveText, /event: end/);
 srv.close();

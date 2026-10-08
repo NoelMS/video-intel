@@ -24,7 +24,7 @@ const bad = msg => { throw new HttpError(400, msg); };
 
 async function body(req) {
   let raw = '';
-  for await (const chunk of req) { raw += chunk; if (raw.length > 1e6) throw new HttpError(413, 'Body too large'); }
+  for await (const chunk of req) { raw += chunk; if (raw.length > 2e6) throw new HttpError(413, 'Body too large'); }
   try { return raw ? JSON.parse(raw) : {}; } catch { bad('Body is not valid JSON'); }
 }
 
@@ -68,6 +68,28 @@ function validWatch(b, partial = false) {
   if (!partial || 'scope' in b) { if (b.scope !== 'all' && !api.camera(b.scope)) bad('unknown scope'); out.scope = b.scope; }
   for (const k of ['from', 'to']) if (!partial || k in b) { if (!HHMM.test(b[k])) bad(`${k} must be HH:MM`); out[k] = b[k]; }
   if ('status' in b) { if (!['active', 'paused'].includes(b.status)) bad('status must be active or paused'); out.status = b.status; }
+  return out;
+}
+
+const str = (v, max, field) => { if (typeof v !== 'string' || !v.trim() || v.length > max) bad(`${field} must be 1-${max} characters`); return v.trim(); };
+const iso = (v, field) => { if (typeof v !== 'string' || Number.isNaN(Date.parse(v))) bad(`${field} must be an ISO date`); return new Date(v).toISOString(); };
+function validReg(b) {
+  const out = { name: str(b.name, 80, 'name'), location: str(b.location, 120, 'location'), tz: str(b.tz, 64, 'tz') };
+  try { new Intl.DateTimeFormat('en', { timeZone: out.tz }); } catch { bad('unknown timezone'); }
+  const s = b.source || {};
+  if (s.kind === 'file') out.source = { kind: 'file', name: str(s.name, 200, 'source.name'), size: Number.isFinite(s.size) && s.size >= 0 ? s.size : bad('source.size'), type: typeof s.type === 'string' ? s.type.slice(0, 100) : '' };
+  else if (s.kind === 'url') { if (!/^(https?|rtsp):\/\/\S+$/.test(s.url || '') || s.url.length > 500) bad('source.url must be http(s) or rtsp'); out.source = { kind: 'url', url: s.url }; }
+  else bad('source.kind must be file or url');
+  out.start = iso(b.start, 'start');
+  if (b.end != null) { out.end = iso(b.end, 'end'); if (out.end <= out.start) bad('end must be after start'); }
+  out.neighbors = Array.isArray(b.neighbors) ? b.neighbors.map(n => api.camera(n) ? n : bad(`unknown neighbor ${n}`)) : [];
+  out.labels = Array.isArray(b.labels) ? b.labels.slice(0, 10).map(l => str(l, 60, 'label')) : [];
+  if (b.video != null) {
+    const v = b.video;
+    if (!(v.duration > 0) || !Number.isInteger(v.width) || !Number.isInteger(v.height)) bad('video needs duration, width, height');
+    out.video = { duration: v.duration, width: v.width, height: v.height };
+  }
+  out.thumbs = Array.isArray(b.thumbs) ? b.thumbs.slice(0, 12).map(t => typeof t === 'string' && t.startsWith('data:image/jpeg;base64,') && t.length < 80000 ? t : bad('thumbs must be small JPEG data URLs')) : [];
   return out;
 }
 
@@ -122,6 +144,9 @@ const routes = [
     if (b.action !== 'reveal' || !api.event(b.eventId)) bad('only reveal of a known eventId is audited');
     return api.addAudit({ action: 'reveal', eventId: b.eventId, role: (await api.getSettings()).operator.role }); // api enforces the role (403)
   }],
+  ['GET', /^registrations$/, () => api.getRegistered()],
+  ['POST', /^registrations$/, async req => api.registerCamera(validReg(await body(req)))],
+  ['DELETE', /^registrations\/([\w-]+)$/, async (_, [id]) => { await api.deleteRegistered(id); return { ok: true }; }],
   ['GET', /^watches$/, () => api.getWatches()],
   ['POST', /^watches$/, async req => api.createWatch(validWatch(await body(req)))],
   ['PUT', /^watches\/([\w-]+)$/, async (req, [id]) => { await api.updateWatch(id, validWatch(await body(req), true)); return { ok: true }; }],

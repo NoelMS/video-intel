@@ -22,7 +22,7 @@ const STRENGTH = { strong: 'LIKELY SAME ENTITY', likely: 'LIKELY CONTINUATION', 
 let cams = [], allEvents = [];
 const S = {
   view: 'search', phase: 'idle', query: '', scope: 'all', stages: [], interp: null, res: null, context: null, error: null,
-  memory: [], history: [], saved: [], notes: '', settings: api.DEFAULT_SETTINGS, depth: null, reveal: false, audit: [], watches: [], alerts: [],
+  memory: [], history: [], saved: [], notes: '', settings: api.DEFAULT_SETTINGS, depth: null, reveal: false, audit: [], watches: [], alerts: [], registered: [],
   live: { running: false, done: false, t: api.W[0], speed: 60, feed: [], streams: {}, lastAt: null, ac: null }, zoom: 0, jtab: 'sequence', resolver: null, layer: null, camFocus: null, abort: null,
 };
 const set = patch => { Object.assign(S, patch); render(); };
@@ -397,7 +397,8 @@ function zoomTo(z) {
 function camerasView() {
   const avail = cams.filter(c => c.status !== 'offline'), gaps = api.coverageGaps(cams, W);
   return `<section class="page"><header class="page-h"><p class="eyebrow">CAMERAS</p><h1>The archive.</h1>
-    <p class="lede">${cams.length} registered cameras · ${DAY} · 09:00 → 10:00 ${TZ}. Recorded footage only.</p></header>
+    <p class="lede">${cams.length} registered cameras · ${DAY} · 09:00 → 10:00 ${TZ}. Recorded footage only.</p>
+    <button class="btn" data-act="register">Register camera</button></header>
     <section class="health" aria-label="Index health"><dl class="kv">
       <div><dt>Cameras</dt><dd>${avail.length} / ${cams.length} available</dd></div>
       <div><dt>Index</dt><dd>Complete for available footage</dd></div>
@@ -409,6 +410,7 @@ function camerasView() {
       <th scope="row"><span class="thumb">${frame(c.id, { time: '09:00:00' })}</span><span><b class="mono">${c.code}</b> ${c.name}</span></th>
       <td class="mono st-${c.status}">${statusWord(c)}</td><td>${density(c, true)}</td><td class="mono">${indexed(c)}</td><td class="mono">${fmtSync(c.sync)}</td>
       <td><button class="txt" data-act="scope" data-id="${c.id}" ${c.status === 'offline' ? 'disabled' : ''}>Search this camera</button></td></tr>`).join('')}</tbody></table>
+    ${registeredList()}
     ${timeline()}</section>`;
 }
 
@@ -501,7 +503,7 @@ function openLayer(L) {
 }
 dlg.addEventListener('close', () => { stopPlay(); S.layer = null; S.reveal = false; dlg.innerHTML = ''; });
 
-const LAYERS = { diag: () => diagLayer(), evidence: evidenceLayer, compare: compareLayer, passport: passportLayer, resolver: () => resolver(S.resolver), palette: () => paletteLayer() };
+const LAYERS = { register: () => registerLayer(), video: L => videoLayer(L), diag: () => diagLayer(), evidence: evidenceLayer, compare: compareLayer, passport: passportLayer, resolver: () => resolver(S.resolver), palette: () => paletteLayer() };
 
 function evidenceLayer({ id, off = 0, focus = false }) {
   const e = ev(id), c = cam(e.cameraId), q = S.res?.interp;
@@ -597,6 +599,117 @@ function passportLayer({ track }) {
     <ol class="pp">${s.map(e => `<li><button data-act="open" data-id="${e.id}" aria-label="Open ${cam(e.cameraId).code} ${e.time}">${still(e, { crop: true })}</button><span class="mono">${cam(e.cameraId).code} · ${e.time}</span></li>`).join('')}</ol>
     ${maskable({ entity: o.entity }) && !S.reveal ? `<p class="mono dim">${o.entity === 'person' ? 'Faces' : 'Plates'} masked by privacy setting.</p>` : ''}
     <div class="acts"><button class="btn" data-act="follow" data-track="${track}">Open journey</button></div>`;
+}
+
+// ---------- import + registration (§116-118) ----------
+// Decoding and frame extraction are real and run in this browser. Object/attribute/event indexing needs the backend
+// indexer, which this build does not have, so registered cameras are listed but never searched.
+const SESSION_URLS = new Map(); // registration id -> object URL (lives only for this page session)
+const TZS = ['Asia/Kolkata', 'UTC', 'Europe/London', 'America/New_York', 'Asia/Singapore', 'Australia/Sydney'];
+
+function registerLayer() {
+  return `<header class="ev-top"><p class="eyebrow">REGISTER CAMERA</p><button class="txt" data-act="close">Close · Esc</button></header>
+    <h2 class="claim">Add recorded footage</h2>
+    <form class="reg" data-form="register">
+      <fieldset><legend class="eyebrow">SOURCE · one of</legend>
+        <label class="fld">Video files<input type="file" name="files" accept="video/*" multiple></label>
+        <label class="fld">A folder of videos<input type="file" name="folder" webkitdirectory></label>
+        <label class="fld">Stream URL<input type="url" name="url" placeholder="rtsp://… or https://…" pattern="(https?|rtsp)://.+"></label></fieldset>
+      <fieldset><legend class="eyebrow">CAMERA</legend>
+        <label class="fld">Camera name<input name="name" maxlength="80" placeholder="Required unless importing several files"></label>
+        <label class="fld">Location<input name="location" maxlength="120" required></label>
+        <label class="fld">Timezone<input name="tz" list="tzs" value="Asia/Kolkata" required><datalist id="tzs">${TZS.map(t => `<option value="${t}">`).join('')}</datalist></label>
+        <label class="fld">Recording start<input type="datetime-local" name="start" value="${DAY}T09:00" step="1" required></label>
+        <label class="fld">Recording end<input type="datetime-local" name="end" step="1"><span class="dim">Leave empty to take it from the video duration</span></label></fieldset>
+      <fieldset><legend class="eyebrow">TOPOLOGY · optional, improves cross-camera reasoning</legend>
+        <div class="nbrs">${cams.map(c => `<label class="opt"><input type="checkbox" name="neighbors" value="${c.id}"><span>${c.code} ${c.name}</span></label>`).join('')}</div>
+        <label class="fld">Known region labels<input name="labels" placeholder="Side door, Bay 4"></label></fieldset>
+      <div class="acts"><button class="btn primary">Register</button></div>
+      <div id="reg-progress" aria-live="polite"></div>
+    </form>`;
+}
+
+const progressBlock = (name, k, n, err) => `<div class="indexing"><p class="eyebrow">ADDING CAMERA</p><p class="claim-s">${esc(name)}</p><ol>
+  <li class="${k > 0 ? 'done' : err ? 'fail' : 'run'}">Video metadata${err ? ` · <span class="warn">${esc(err)}</span>` : ''}</li>
+  <li class="${k === n ? 'done' : k > 0 ? 'run' : ''}">Frame extraction <span class="mono">${k}/${n}</span><span class="bar"><i style="width:${k / n * 100}%"></i></span></li>
+  ${['Objects', 'Attributes', 'Events', 'Temporal index'].map(s => `<li class="na">${s} <span class="mono dim">requires backend indexer · not run</span></li>`).join('')}</ol></div>`;
+
+async function probeVideo(file, onFrame) {
+  const url = URL.createObjectURL(file), v = Object.assign(document.createElement('video'), { muted: true, preload: 'auto', src: url });
+  const seek = t => new Promise(r => { v.onseeked = r; v.currentTime = t; });
+  await new Promise((res, rej) => { v.onloadedmetadata = res; v.onerror = () => rej(new Error('this browser cannot decode the file')); });
+  if (!Number.isFinite(v.duration)) { await seek(1e9); await seek(0); } // MediaRecorder WebM reports Infinity until seeked to the end
+  const { duration, videoWidth: w, videoHeight: h } = v, N = 12, thumbs = [];
+  if (!(duration > 0) || !w) throw new Error('video has no decodable frames');
+  const c = Object.assign(document.createElement('canvas'), { width: 240, height: Math.round(240 * h / w) }), g = c.getContext('2d');
+  for (let i = 0; i < N; i++) {
+    await seek(Math.min(duration - 0.01, duration * (i + 0.5) / N));
+    g.drawImage(v, 0, 0, c.width, c.height);
+    thumbs.push(c.toDataURL('image/jpeg', 0.6));
+    onFrame(i + 1, N);
+  }
+  return { url, duration, width: w, height: h, thumbs };
+}
+
+async function registerFootage(form) {
+  const fd = new FormData(form), prog = $('#reg-progress');
+  const files = [...form.files.files, ...form.folder.files].filter(f => f.type.startsWith('video/') || /\.(mp4|webm|mov|mkv|m4v|ogv)$/i.test(f.name));
+  const url = fd.get('url').trim(), name = fd.get('name').trim();
+  if (!files.length && !url) return toast('Choose a video file, a folder, or a stream URL');
+  if (files.length <= 1 && !name) return form.name.focus(), toast('Name the camera');
+  const start = new Date(fd.get('start')), endIn = fd.get('end') ? new Date(fd.get('end')) : null;
+  const base = { location: fd.get('location').trim(), tz: fd.get('tz').trim(), neighbors: fd.getAll('neighbors'),
+    labels: fd.get('labels').split(',').map(s => s.trim()).filter(Boolean), start: start.toISOString() };
+  form.querySelector('button.primary').disabled = true;
+  let ok = 0;
+  for (const f of files) {
+    const nm = files.length === 1 ? name : f.name.replace(/\.[^.]+$/, '');
+    prog.innerHTML = progressBlock(nm, 0, 12);
+    try {
+      const v = await probeVideo(f, (k, n) => { prog.innerHTML = progressBlock(nm, k, n); });
+      const row = await api.registerCamera({ ...base, name: nm, source: { kind: 'file', name: f.name, size: f.size, type: f.type },
+        end: (endIn ?? new Date(start.getTime() + v.duration * 1000)).toISOString(),
+        video: { duration: +v.duration.toFixed(2), width: v.width, height: v.height }, thumbs: v.thumbs.filter((_, i) => i % 2) });
+      SESSION_URLS.set(row.id, v.url); ok++;
+    } catch (e) { prog.innerHTML = progressBlock(nm, 0, 12, e.message); toast(`${f.name}: ${e.message}`); }
+  }
+  if (url) {
+    try { await api.registerCamera({ ...base, name: name || url, source: { kind: 'url', url }, ...(endIn ? { end: endIn.toISOString() } : {}) }); ok++; }
+    catch (e) { toast(e.message); }
+  }
+  form.querySelector('button.primary').disabled = false;
+  if (!ok) return;
+  S.registered = await api.getRegistered();
+  toast(`${ok} camera${ok === 1 ? '' : 's'} registered · not yet searchable`);
+  if (!files.length || ok === files.length + (url ? 1 : 0)) { dlg.close(); go('cameras'); }
+}
+
+function registeredList() {
+  if (!S.registered.length) return '';
+  const mb = n => n < 1048576 ? Math.ceil(n / 1024) + ' KB' : (n / 1048576).toFixed(1) + ' MB', when = d => new Date(d).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'medium' });
+  return `<section class="reg-list"><p class="eyebrow">REGISTERED · NOT YET SEARCHABLE</p>
+    <p class="dim">Frames were extracted in the browser. Object, attribute and event indexing need the backend indexer, which this build does not include, so these cameras are not searched.</p>
+    <ol>${S.registered.map(r => `<li class="reg-item">
+      <div class="strip">${r.thumbs?.length ? r.thumbs.map((t, i) => `<img src="${t}" alt="Extracted frame ${i + 1}">`).join('') : '<span class="dim mono">No frames · stream not ingested</span>'}</div>
+      <div><h3>${esc(r.name)}</h3><p class="mono dim">${esc(r.location)} · ${esc(r.tz)}</p>
+        <dl class="kv">
+          <div><dt>Source</dt><dd class="mono">${r.source.kind === 'file' ? `${esc(r.source.name)} · ${mb(r.source.size)}` : esc(r.source.url)}</dd></div>
+          <div><dt>Recording</dt><dd class="mono">${when(r.start)}${r.end ? ' → ' + when(r.end) : ''}</dd></div>
+          ${r.video ? `<div><dt>Video</dt><dd class="mono">${r.video.width}×${r.video.height} · ${dur(Math.round(r.video.duration))}</dd></div>` : ''}
+          ${r.neighbors.length ? `<div><dt>Neighbours</dt><dd class="mono">${r.neighbors.map(n => cam(n).code).join(', ')}</dd></div>` : ''}
+          ${r.labels.length ? `<div><dt>Region labels</dt><dd>${r.labels.map(esc).join(', ')}</dd></div>` : ''}
+          <div><dt>Status</dt><dd class="mono">${r.status === 'frames-extracted' ? `FRAMES EXTRACTED · ${r.thumbs.length * 2} sampled · AWAITING INDEXER` : 'URL REGISTERED · AWAITING INGEST'}</dd></div></dl>
+        <div class="acts">${SESSION_URLS.has(r.id) ? `<button class="btn" data-act="play-reg" data-id="${r.id}">Play source</button>`
+          : r.source.kind === 'file' ? `<label class="txt reattach">Re-attach ${esc(r.source.name)} to play<input type="file" accept="video/*" data-reattach="${r.id}"></label>` : ''}
+          <button class="txt danger" data-act="unregister" data-id="${r.id}">Remove</button></div></div></li>`).join('')}</ol></section>`;
+}
+
+function videoLayer({ id }) {
+  const r = S.registered.find(x => x.id === id);
+  return `<header class="ev-top"><p class="eyebrow">SOURCE FOOTAGE · ${esc(r.name)}</p><button class="txt" data-act="close">Close · Esc</button></header>
+    <h2 class="sr-only">${esc(r.name)} source video</h2>
+    <video class="src-video" src="${SESSION_URLS.get(id)}" controls autoplay muted></video>
+    <p class="mono dim">Playing the local file attached in this session. Not indexed, so no detections are overlaid.</p>`;
 }
 
 // ---------- live (§32), standing queries (§33), alerts (§34) ----------
@@ -901,6 +1014,13 @@ function cycleTheme() {
 
 const ACT = {
   theme: cycleTheme,
+  register: () => openLayer({ kind: 'register' }),
+  'play-reg': d => openLayer({ kind: 'video', id: d.id }),
+  unregister: async d => {
+    const r = S.registered.find(x => x.id === d.id);
+    if (!confirm(`Remove “${r.name}”? Extracted frames are discarded.`)) return;
+    await api.deleteRegistered(d.id); SESSION_URLS.delete(d.id); S.registered = await api.getRegistered(); render();
+  },
   'live-toggle': () => S.live.running ? S.live.ac.abort() : liveStart(),
   'live-reset': () => { S.live.ac?.abort(); Object.assign(S.live, { t: W[0], feed: [], streams: {}, done: false, lastAt: null }); render(); },
   'watch-toggle': async d => { const w = S.watches.find(x => x.id === d.id); await api.updateWatch(d.id, { status: w.status === 'active' ? 'paused' : 'active' }); S.watches = await api.getWatches(); render(); },
@@ -947,6 +1067,7 @@ dlg.addEventListener('click', e => {
 document.addEventListener('submit', e => {
   if (e.target.dataset.form === 'settings') { e.preventDefault(); return saveSettings(e.target); }
   if (e.target.dataset.form === 'watch') { e.preventDefault(); return saveWatch(e.target); }
+  if (e.target.dataset.form === 'register') { e.preventDefault(); return registerFootage(e.target); }
   if (e.target.dataset.form !== 'search') return;
   e.preventDefault();
   const fd = new FormData(e.target);
@@ -965,6 +1086,11 @@ document.addEventListener('change', e => {
   const t = e.target;
   if (t.id === 'speed') P.speed = +t.value;
   else if (t.id === 'live-speed') S.live.speed = +t.value;
+  else if (t.dataset.reattach && t.files[0]) {
+    const r = S.registered.find(x => x.id === t.dataset.reattach), f = t.files[0];
+    if (f.name !== r.source.name || f.size !== r.source.size) toast(`Attached ${f.name}; it differs from the registered ${r.source.name}`);
+    SESSION_URLS.set(r.id, URL.createObjectURL(f)); render();
+  }
   else if (t.dataset.tog) { P[t.dataset.tog] = t.checked; drawFrame(); }
   else if (t.name === 'scope') S.scope = t.value;
 });
@@ -1046,4 +1172,5 @@ function render() {
 
 [cams, allEvents, S.memory, S.history, S.saved, S.notes, S.settings, S.audit, S.watches, S.alerts] = await Promise.all([api.getCameras(), api.getEvents(),
   api.getMemory(), api.getHistory(), api.getSaved(), api.getNotes(), api.getSettings(), api.getAudit(), api.getWatches(), api.getAlerts()]);
+S.registered = await api.getRegistered();
 render();

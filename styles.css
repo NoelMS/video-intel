@@ -443,3 +443,25 @@ dialog.palette { width: min(640px, 92vw); margin-top: 12vh; padding: 0; }
 .alert-toast { background: var(--raised); border: 1px solid var(--line-strong); border-left: 2px solid var(--warn); padding: 12px 14px; width: 320px; display: grid; gap: 4px; font-size: 13px; animation: rise var(--med) var(--ease); }
 .alert-toast .eyebrow { margin: 0; }
 @media (max-width: 1080px) { .live-grid { grid-template-columns: 1fr; } }
+
+/* registration */
+.reg { display: grid; gap: 30px; max-width: 900px; }
+.reg fieldset { border: 0; padding: 0; margin: 0; display: grid; gap: 10px; }
+.reg .fld { grid-template-columns: 200px 1fr; } .reg .fld .dim { grid-column: 2; font-size: 12px; }
+.reg input[type=file] { font-size: 13px; color: var(--text-2); }
+.nbrs { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 0 20px; }
+.indexing { border: 1px solid var(--line-strong); padding: 18px 20px; background: var(--surface); }
+.indexing .claim-s { font-size: 20px; font-weight: 600; margin-bottom: 12px; }
+.indexing li { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+.indexing li::before { content: '○'; width: 14px; color: var(--muted); }
+.indexing li.done::before { content: '✓'; color: var(--ok); } .indexing li.run::before { content: '●'; color: var(--accent); }
+.indexing li.fail::before { content: '✕'; color: var(--err); } .indexing li.na { color: var(--muted); } .indexing li.na::before { content: '—'; }
+.indexing .bar { flex: 1; min-width: 120px; height: 2px; background: var(--line); position: relative; } .indexing .bar i { position: absolute; inset: 0 auto 0 0; background: var(--accent); }
+.reg-list { margin: 48px 0; } .reg-list > .dim { max-width: 70ch; margin-bottom: 18px; }
+.reg-item { display: grid; grid-template-columns: minmax(280px, 1fr) 1.3fr; gap: 32px; padding: 24px 0; border-top: 1px solid var(--line); }
+.reg-item h3 { font-size: 24px; letter-spacing: -.02em; }
+.strip { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; align-content: start; }
+.strip img { width: 100%; display: block; border: 1px solid var(--line); }
+.reattach input { display: block; margin-top: 6px; font-size: 12px; }
+.src-video { width: 100%; max-height: 70vh; background: #000; display: block; margin-bottom: 10px; }
+@media (max-width: 1080px) { .reg-item { grid-template-columns: 1fr; } .reg .fld { grid-template-columns: 1fr; } .reg .fld .dim { grid-column: 1; } }

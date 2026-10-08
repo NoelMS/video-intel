@@ -57,3 +57,6 @@ export function live({ speed = 60, from, onTick = () => {}, onEvent = () => {}, 
     es.onerror = () => { if (es.readyState === EventSource.CLOSED) return; es.close(); reject(new Error('Live stream disconnected')); };
   });
 }
+export const getRegistered = () => j('registrations');
+export const registerCamera = c => j('registrations', { method: 'POST', body: c });
+export const deleteRegistered = id => j('registrations/' + id, { method: 'DELETE' });
