@@ -190,14 +190,15 @@ export function interpret(text, refs, context, vocab = vocabOf()) {
   const ref = refs.find(r => [r.name, ...(r.aliases || [])].some(n => lc.includes(n.toLowerCase())));
   let location = ref ? { term: ref.name, ref } : null;
   if (!location) {
-    const m = lc.match(/\b(?:the|near|at|through|into|by)\s+((?:[a-z]+\s)?(?:gate|entrance|exit|area|door|dock|bay|zone|corridor|yard))\b/);
+    // a place word nobody has defined yet: asked about once, then remembered
+    const m = lc.match(/\b(?:the|near|at|through|into|by)\s+((?:[a-z]+\s)?(?:gate|entrance|exit|area|door|dock|bay|zone|corridor|yard|junction|crossing|roundabout|car park|park|parking lot|lot|lobby|stairs|stairwell|staircase|corner|platform|bus stop|stop|driveway|ramp|bridge|tunnel|square|plaza|walkway|path|footpath|pavement|forecourt|station))\b/);
     if (m) location = { term: m[1].replace(/^(the|near|at|by)\s/, ''), ref: null };
   }
   const follow = context && /\b(it|this|that|they|them|he|she|the same)\b/.test(lc) ? context : null;
   const journey = /\bwhere (did|does|do|was|is|has)\b|\bfollow\b|\bjourney\b/.test(lc);
   return {
     text, entity, attrs, location, follow,
-    crossing: /\b(pass(ed|es)?|through|enter(ed|s|ing)?|came in|went in)\b/.test(lc),
+    crossing: /\b(pass(ed|es)?|through|enter(ed|s|ing)?|came in|went in|cross(ed|es|ing)?|across|over)\b/.test(lc),
     intent: journey ? 'journey' : !entity && !attrs.length && !follow && GENERIC.test(lc) ? 'activity' : 'find',
     ...timeWindow(lc),
     yesNo: /^\s*(did|was|were|is|are|has|have)\b/.test(lc),

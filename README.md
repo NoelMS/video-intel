@@ -30,10 +30,13 @@ against a standard CLIP frame-retrieval baseline on the same footage:
 | | Hit@1 | Hit@5 | MRR | Median time error |
 |---|---|---|---|---|
 | Baseline: CLIP frame retrieval | 30.2% | 46.5% | 0.363 | 3.5 s |
-| This system | **41.9%** | **72.1%** | **0.528** | **0.3 s** |
+| This system | **41.9%** | **76.7%** | **0.544** | **0.5 s** |
 
-The gain is on activities (Hit@5 29.6% to 70.4%); on simple appearance queries the baseline is about as good. Method,
+The gain is on activities (Hit@5 29.6% to 70.4%); on simple appearance queries the baseline is as good at Hit@1. Method,
 ablation, held-out split, latency and limitations are in **[WRITEUP.md](WRITEUP.md)**; reproduce with `node eval/eval.mjs`.
+
+In the app, every answer shows the baseline's top 5 beside it, and when the question is one of the 43 both are marked
+right or wrong against the labelled answer. The System page shows this table.
 
 ## Screenshots
 

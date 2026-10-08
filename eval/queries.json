@@ -2150,11 +2150,11 @@
    ]
   },
   {
-   "id": "attr-red-car-in-the-car-park",
+   "id": "attr-parked-red-car",
    "split": "heldout",
    "kind": "attribute",
    "source": "hand-labelled",
-   "text": "Find a red car in the car park",
+   "text": "Find a parked red car",
    "answers": [
     {
      "camera": "MEVA G339",

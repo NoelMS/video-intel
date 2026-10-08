@@ -96,13 +96,18 @@ const nowSec = () => { const d = new Date(); return d.getHours() * 3600 + d.getM
 const covers = (w, f, refs) => { const q = interpret(w.text, refs, null); return !q.location || q.location.ref?.cameraId === f.cameraKey; };
 export const fastWhy = f => f.fast ? 'started manually'
   : load('vi.watches', []).some(w => w.status === 'active' && (w.scope === 'all' || w.scope === f.cameraKey) && inSchedule(nowSec(), w) && covers(w, f, load('vi.memory', []))) ? 'standing query hours' : null;
-const recording = f => f.active && f.kind === 'stream' && (f.continuous || !!fastWhy(f));
+const recording = f => !allPaused() && f.active && f.kind === 'stream' && (f.continuous || !!fastWhy(f));
+// Pause all: no timed or fast captures and no recording until resumed; each camera keeps its own settings, so resuming
+// puts everything back as it was. "Capture now" still works (someone asked for that clip).
+export const allPaused = () => load('vi.capturePaused', false) === true;
+export function pauseAll(paused) { save('vi.capturePaused', !!paused); recordContinuously(); if (!paused) tick(); }
 const due = f => f.next <= Date.now() || (fastWhy(f) && f.next > Date.now() + FAST_SEC * 1e3);
 export const removeFeed = id => save('vi.feeds', listFeeds().filter(f => f.id !== id));   // clips already indexed stay
 
 export const MAX_BACKLOG = 12;   // captures pause while this many clips wait for the model, rather than queueing forever
 const capturing = new Set();
 async function tick() {
+  if (allPaused()) return;
   for (const f of listFeeds().filter(f => f.active && !recording(f) && due(f) && !capturing.has(f.id))) {
     if (indexer.backlog().clips >= MAX_BACKLOG) { putFeed({ ...f, state: 'Paused while the indexing backlog clears', next: Date.now() + 60e3 }); continue; }
     captureFeed(f);
@@ -137,7 +142,7 @@ function recordContinuously() {
   for (const f of feeds) {
     const on = recording(f), r = recorders.get(f.id);
     if (on && !r) startRecorder(f);
-    else if (!on && r) stopRecorder(f.id);
+    else if (!on && r) { queueSegments(f, r); stopRecorder(f.id); }   // finished segments are kept, not thrown away
     else if (r) queueSegments(f, r);
   }
   for (const id of recorders.keys()) if (!feeds.some(f => f.id === id)) stopRecorder(id);

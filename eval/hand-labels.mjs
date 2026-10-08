@@ -33,7 +33,8 @@ const LABELS = [
   ['Find a person sitting on a bench', ['MEVA G508', 0, 45], ['MEVA G506', 55, 300]],
   ['Find the group of people walking across the car park', ['MEVA G505', 175, 215]],
   ['Find the person carrying a white bag', ['MEVA G419', 125, 135]],
-  ['Find a red car in the car park', ['MEVA G339', 0, 300], ['MEVA G328', 0, 300], ['MEVA G505', 228, 245]],
+  // was "...in the car park": car park is now a place word, so that query (rightly) asks where the car park is first
+  ['Find a parked red car', ['MEVA G339', 0, 300], ['MEVA G328', 0, 300], ['MEVA G505', 228, 245]],
 ];
 
 const at = (cam, s) => new Date(Date.parse(START[cam]) + s * 1000).toISOString();

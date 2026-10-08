@@ -152,7 +152,9 @@ function interpretation() {
   if (q.attrs.length) rows.push(['ATTRIBUTE', q.attrs.join(' · ')]);
   if (q.location) rows.push(['LOCATION', q.location.ref ? referentChip(q.location.ref) : `${esc(q.location.term)} <span class="warn mono">UNDEFINED</span>`]);
   rows.push(['EVENT', q.intent === 'journey' ? 'movement across cameras' : q.intent === 'activity' ? 'any activity' : q.crossing ? 'crossing / entering' : 'presence']);
-  rows.push(['TIME', q.after != null || q.before != null ? `${q.after != null ? 'after ' + hm(q.after) : ''} ${q.before != null ? 'before ' + hm(q.before) : ''}` : 'full recording']);
+  // "in the last hour" is measured back from the newest footage, not from now: say so, with the range it became
+  rows.push(['TIME', q.recent ? `last ${q.recent >= 3600 ? `${q.recent / 3600} h` : `${q.recent / 60} min`} of the footage${q.after != null ? ` (${hm(q.after)} → ${hm(q.before)}${q.before - q.after < q.recent ? ', all of it' : ''})` : ''}`
+    : q.after != null || q.before != null ? `${q.after != null ? 'after ' + hm(q.after) : ''} ${q.before != null ? 'before ' + hm(q.before) : ''}` : 'full recording']);
   return `<section class="interp" aria-label="How the query was interpreted"><p class="eyebrow">UNDERSTANDING</p>
     <dl>${rows.map(([k, v]) => `<div><dt class="mono">${k}</dt><dd>${v}</dd></div>`).join('')}</dl></section>`;
 }
@@ -196,7 +198,7 @@ function stage() {
     <div class="acts"><button class="btn" data-act="ask" data-q="${esc(S.query)}">Retry</button><button class="txt" data-act="go" data-view="cameras">Inspect system status</button></div></div>`;
   const r = S.res;
   return `<div class="ctxbar mono"><button class="txt home-link" data-act="home">← Home</button><span><b>QUERY</b> ${esc(S.query)}</span><span><b>TIME</b> ${hm(r.window[0])} → ${r.window[1] > r.window[0] ? hm(r.window[1]) : 'end'} ${ds().TZ}</span>
-    <span><b>CAMERAS</b> ${r.scoped.length}</span><span><b>STATUS</b> ${STATUS[r.status]}</span></div>` + RESULT[r.status](r);
+    <span><b>CAMERAS</b> ${r.scoped.length}</span><span><b>STATUS</b> ${STATUS[r.status]}</span></div>` + RESULT[r.status](r) + comparePanel(r);
 }
 
 // ---------- results ----------
@@ -1055,13 +1057,13 @@ const feedImage = f => f.image || (S.videos.filter(v => v.cameraKey === f.camera
 const feedItem = f => { const img = feedImage(f); return `<li class="feed ${f.active ? '' : 'paused'}">
   ${img ? `<img loading="lazy" src="${esc(f.image || `api/videos/${img}/frames/1`)}" alt="">` : '<span class="noimg"></span>'}
   <div><p class="cn">${esc(f.name)}</p><p class="mono dim">${esc(FEED_KIND[f.provider] || 'Stream')} · ${f.active && f.fastWhy ? `<b>fast capture</b> (${f.fastWhy}): ${f.kind === 'stream' ? `continuous, ${f.clipSec} s segments` : 'every 30 s'}` : f.continuous ? `continuous, ${f.clipSec} s segments` : `every ${f.intervalMin} min${f.kind === 'stream' ? ` for ${f.clipSec} s` : ''}`} · ${f.captures} capture${f.captures === 1 ? '' : 's'}</p>
-    <p class="mono ${f.lastError ? 'warn' : 'dim'}">${f.active ? esc(f.state) : 'Paused'}${f.last ? ` · last ${new Date(f.last).toLocaleTimeString('en-GB')}` : ''}${f.lastError ? ` · ${esc(f.lastError)}` : ''}</p></div>
+    <p class="mono ${f.lastError ? 'warn' : 'dim'}">${f.active && S.ingest?.capturePaused ? 'Paused with all capture' : f.active ? esc(f.state) : 'Paused'}${f.last ? ` · last ${new Date(f.last).toLocaleTimeString('en-GB')}` : ''}${f.lastError ? ` · ${esc(f.lastError)}` : ''}</p></div>
   <div class="acts"><button class="txt" data-act="feed-capture" data-id="${f.id}" ${f.capturing ? 'disabled' : ''}>${f.capturing ? 'Capturing…' : 'Capture now'}</button><button class="txt" data-act="feed-fast" data-id="${f.id}" data-on="${f.fast ? 0 : 1}" title="Capture as often as the camera allows until stopped">${f.fast ? 'Stop capture' : 'Start capture'}</button><button class="txt" data-act="feed-toggle" data-id="${f.id}" data-on="${f.active ? 0 : 1}">${f.active ? 'Pause' : 'Resume'}</button><button class="txt danger" data-act="feed-del" data-id="${f.id}">Remove</button></div></li>`; };
 function ingestPanel() {
   const ig = S.ingest; if (!ig) return '';
   const b = ig.backlog, active = ig.imports.filter(i => ['queued', 'downloading'].includes(i.state)), failed = ig.imports.filter(i => i.state === 'failed');
   return `${b.clips ? `<p class="backlog"><b>Indexing backlog</b> · ${b.clips} clip${b.clips === 1 ? '' : 's'} · ${hmsDur(b.seconds)} of footage${b.eta ? ` · up to ${hmsDur(b.eta)} at ${b.secPerFrame.toFixed(1)} s a frame (measured)` : ''}${b.clips >= ig.maxBacklog ? ' · live captures pause until it clears' : ''}</p>` : ''}
-    ${ig.feeds.length ? `<section class="feeds"><p class="eyebrow">LIVE CAMERAS · capturing while the app is open</p><ol>${ig.feeds.map(feedItem).join('')}</ol>
+    ${ig.feeds.length ? `<section class="feeds"><div class="feeds-h"><p class="eyebrow">LIVE CAMERAS · ${ig.capturePaused ? 'all capture paused' : 'capturing while the app is open'}</p>${pauseAllBtn()}</div><ol>${ig.feeds.map(feedItem).join('')}</ol>
       <p class="attrib">${[...new Set(ig.feeds.map(f => ig.attribution[f.provider]).filter(Boolean))].join(' ')}</p></section>` : ''}
     ${active.length || failed.length ? `<section class="imports"><p class="eyebrow">IMPORTS</p><ol>${[...active, ...failed].slice(0, 12).map(i => `<li><span>${esc(i.name)} <span class="mono dim">${esc(i.url.split('/').pop())}</span></span>
       <span class="mono ${i.state === 'failed' ? 'warn' : 'dim'}">${i.state === 'failed' ? esc(i.error) : i.state === 'downloading' ? `${mb(i.done)} / ${mb(i.total || 0)}` : 'queued'}</span></li>`).join('')}</ol>
@@ -1154,14 +1156,17 @@ async function switchSource(src) {
 // capture is indexed and checked against the standing queries on the server; this page shows what came in.
 const liveKeys = () => new Set((S.ingest?.feeds || []).map(f => f.cameraKey));
 const nowSec = () => { const d = new Date(); return d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds(); };
+// One switch for all live capture; each camera's own Pause/Resume and schedule are kept for when it is resumed.
+const pauseAllBtn = () => `<button class="btn ${S.ingest?.capturePaused ? 'primary' : ''}" data-act="capture-all" data-on="${S.ingest?.capturePaused ? 1 : 0}">${S.ingest?.capturePaused ? 'Resume all capture' : 'Pause all capture'}</button>`;
 function liveView() {
   const feeds = S.ingest?.feeds || [];
   if (!feeds.length) return `<section class="page"><header class="page-h"><p class="eyebrow">LIVE</p><h1>No live cameras yet.</h1>
     <p class="lede">Live shows public or network cameras being captured now: London and California traffic cameras, or any RTSP/HLS stream. Uploaded recordings and archives stay on the Cameras page.</p>
     <div class="acts">${mode !== 'server' ? '<span class="dim">Live cameras need the local server: open Video Intelligence.exe.</span>'
       : ds().DEMO ? '<button class="btn primary" data-act="source" data-src="mine">Switch to My footage</button>' : '<button class="btn primary" data-act="src-open" data-tab="tfl">Add live cameras</button>'}</div></header></section>`;
-  return `<section class="page"><header class="page-h"><p class="eyebrow">LIVE · ${feeds.filter(f => f.active).length} of ${feeds.length} camera${feeds.length === 1 ? '' : 's'} capturing</p><h1>What the cameras see now.</h1>
-    <p class="lede">Each camera is captured as clips while the app is open; every clip is analysed here and checked against your standing queries as soon as it is indexed.</p></header>
+  return `<section class="page"><header class="page-h"><p class="eyebrow">LIVE · ${S.ingest?.capturePaused ? 'all capture paused' : `${feeds.filter(f => f.active).length} of ${feeds.length} camera${feeds.length === 1 ? '' : 's'} capturing`}</p><h1>What the cameras see now.</h1>
+    <p class="lede">Each camera is captured as clips while the app is open; every clip is analysed here and checked against your standing queries as soon as it is indexed.</p>
+    <div class="acts">${pauseAllBtn()}</div></header>
     <div id="live-now">${liveNow()}</div>
     <div class="live-grid">
       <section><p class="eyebrow">STANDING QUERIES</p><ol class="watches" id="live-watches">${watchesList()}</ol>${watchForm()}</section>
@@ -1268,6 +1273,10 @@ function systemView() {
           <td class="mono">${c.real ? c.frames.length : pct}</td><td class="mono">${!c.real ? pct : c.embedded ? `${c.embedded.objects} objects · ${c.embedded.frames} frames` : 'none'}</td><td class="mono">${allEvents.filter(e => e.cameraId === c.id).length}</td>
           <td class="mono">${fmtSync(c.sync)}${c.sync != null && Math.abs(c.sync) > 1 ? ' <span class="warn">DRIFT</span>' : ''}</td>
           <td class="mono">${c.status === 'offline' ? 'camera offline' : holes.map(g => hm(g.from) + '–' + hm(g.to)).join(', ') || 'none'}</td></tr>`; }).join('')}</tbody></table></section>
+    ${S.bench?.rows?.length ? `<section class="sys-sec"><p class="eyebrow">BENCHMARK · ${esc(S.bench.title)} · WRITEUP.md</p>
+      <table class="sys-t"><thead><tr>${['Method', 'Hit@1', 'Hit@5', 'MRR', 'Strict Hit@1', 'Right camera @1', 'Median time error (s)', 'Median latency (ms)'].map(h => `<th scope="col">${h}</th>`).join('')}</tr></thead>
+      <tbody>${S.bench.rows.map(rw => `<tr>${rw.slice(0, 8).map((x, i) => i ? `<td class="mono">${esc(x)}</td>` : `<th scope="row">${esc(x)}</th>`).join('')}</tr>`).join('')}</tbody></table>
+      <p class="dim">Questions with known answers: MEVA's official activity annotations and hand labels. Re-run with <span class="mono">node eval/eval.mjs</span>.</p></section>` : ''}
     <form class="settings" data-form="settings">
       <fieldset><legend class="eyebrow">DEFAULT SEARCH DEPTH</legend>
         ${Object.entries(api.DEPTHS).map(([k, d]) => `<label class="opt"><input type="radio" name="depth" value="${k}" ${S.settings.depth === k ? 'checked' : ''}><span><b>${d.label}</b> ${d.note}</span></label>`).join('')}</fieldset>
@@ -1371,6 +1380,40 @@ function openEvidence(id, off = 0, src) {
   document.startViewTransition(() => { src.style.viewTransitionName = ''; open(); });
 }
 
+// ---------- baseline comparison (WRITEUP.md): the same question to plain CLIP frame retrieval ----------
+// Shown under every result on real footage. When the question is one of the evaluation set's (eval/queries.json), both
+// answer lists are marked against its known answer with the evaluation's rule: right camera, time within the span +-5 s.
+async function loadCompare(text) {
+  S.compare = { text, loading: true };
+  try {
+    const [b, a] = await Promise.all([api.baselineSearch(text, 5), api.evalAnswers(text)]);
+    if (S.query === text) { S.compare = { text, baseline: b, answers: a.answers ? a : null }; if (S.phase === 'result') render(); }
+  } catch (e) { S.compare = { text, error: e.message }; if (S.phase === 'result') render(); }
+}
+const absAt = (vid, vt) => { const v = S.videos.find(x => x.id === vid); return v ? Date.parse(v.start) + vt * 1000 : NaN; };
+const hitRank = (list, answers) => list.findIndex(x => answers.some(a => a.camera === x.camera && x.time >= Date.parse(a.from) - 5000 && x.time <= Date.parse(a.to) + 5000));
+// our ranked list as the evaluation reads it: the answer shown, then the rest of the ranked candidates
+function oursRanked(r) {
+  const rej = new Set((r.rejected || []).map(x => x.id));
+  const shown = r.primary ? [r.primary, ...(r.alternatives || [])] : [...(r.candidates || []), ...(r.more || []), ...(r.events || []), ...(r.journey?.sightings || [])];
+  return [...new Set([...shown, ...(r.diag?.retrieved || []).map(x => x.id).filter(i => !rej.has(i))])].filter(i => ev(i)).slice(0, 10)
+    .map(i => { const e = ev(i); return { camera: cam(e.cameraId).name, time: absAt(e.vid, r.moments?.[i] ?? e.vt) }; });
+}
+const mark = k => k === 0 ? '<b class="ok">✓ correct first answer</b>' : k > 0 ? `<b class="ok">✓ correct at #${k + 1}</b>` : '<b class="warn">✗ not in its top 10</b>';
+function comparePanel(r) {
+  const c = S.compare;
+  if (ds().DEMO || !c || c.text !== S.query) return '';
+  if (c.loading) return '<section class="basecmp"><p class="eyebrow">BASELINE FOR COMPARISON</p><p class="dim">Asking the baseline…</p></section>';
+  if (c.error) return `<section class="basecmp"><p class="eyebrow">BASELINE FOR COMPARISON</p><p class="dim">${esc(c.error)}</p></section>`;
+  const base = c.baseline.results.map(x => ({ ...x, camera: cam(x.cameraId)?.name, time: absAt(x.vid, x.vt) })), a = c.answers;
+  const kb = a ? hitRank(base, a.answers) : null, ko = a ? hitRank(oursRanked(r), a.answers) : null;
+  return `<section class="basecmp"><p class="eyebrow">BASELINE FOR COMPARISON · plain CLIP frame retrieval on the same footage</p>
+    ${a ? `<p class="known">This question has a known answer (${esc(a.source)}, ${a.split === 'heldout' ? 'held-out' : 'development'} set). <span>This system: ${mark(ko)}</span> <span>Baseline: ${mark(kb)}</span></p>`
+      : '<p class="dim">This question is not in the evaluation set, so there is no known answer to mark: compare the two by eye. The measured comparison over 43 questions is on the System page.</p>'}
+    <ol class="base-list">${base.map((x, i) => `<li>${x.vid ? `<img loading="lazy" src="api/videos/${x.vid}/frames/${x.n}" alt="">` : ''}<span class="mono">#${i + 1} ${esc(cam(x.cameraId)?.code || '')} · ${x.time ? new Date(x.time).toLocaleTimeString('en-GB', { timeZone: cam(x.cameraId)?.tz }) : x.time} · similarity ${x.score.toFixed(3)}</span>${a ? `<span>${hitRank([x], a.answers) === 0 ? '<b class="ok">✓</b>' : '<b class="warn">✗</b>'}</span>` : ''}</li>`).join('')}</ol>
+    <p class="dim">The baseline ranks whole frames, one per second, by similarity to the question. It has no objects, tracks, labels, places or visual check, so it cannot say which thing in the frame it means.</p></section>`;
+}
+
 async function run(text) {
   text = String(text || '').trim();
   if (!text) return focusQ();
@@ -1388,6 +1431,7 @@ async function run(text) {
     } else {
       const track = res.status === 'journey' ? res.journey.track : res.status === 'supported' ? ev(res.primary).track : null;
       set({ phase: 'result', context: track ? { track } : null });
+      if (mode === 'server' && !ds().DEMO) loadCompare(text);
     }
     $('.verdict')?.focus({ preventScroll: true });
   } catch (err) {
@@ -1459,6 +1503,7 @@ const ACT = {
   'meva-go': d => { SRC.mevaPrefix = d.prefix; loadSourceList(); },
   'meva-import': () => importMeva(),
   'feed-capture': d => openLayer({ kind: 'capture', id: d.id }),
+  'capture-all': async d => { S.ingest = await api.pauseAllCapture(d.on !== '1'); render(); pollVideos(); toast(S.ingest.capturePaused ? 'All live capture paused' : 'Live capture resumed'); },
   'feed-fast': async d => { S.ingest = await api.updateFeed(d.id, d.on === '1' ? { fast: true, active: true } : { fast: false }); render(); pollVideos(); },
   'feed-toggle': async d => { S.ingest = await api.updateFeed(d.id, { active: d.on === '1' }); render(); pollVideos(); },
   'feed-del': async d => { if (!confirm('Stop capturing this camera? Clips already indexed stay.')) return; S.ingest = await api.removeFeed(d.id); render(); },
@@ -1668,7 +1713,7 @@ try {
   await loadDataset();
   [S.memory, S.history, S.saved, S.notes, S.settings, S.audit, S.watches, S.alerts] = await Promise.all([
     api.getMemory(), api.getHistory(), api.getSaved(), api.getNotes(), api.getSettings(), api.getAudit(), api.getWatches(), api.getAlerts()]);
-  if (mode === 'server') { [S.videos, S.ingest] = await Promise.all([api.getVideos(), api.getIngest()]); if (S.ingest.feeds.some(f => f.active)) pollVideos(); if (S.videos.some(v => v.status !== 'ready' && v.status !== 'failed')) pollVideos(); }
+  if (mode === 'server') { api.evalSummary().then(b => { S.bench = b; }).catch(() => {}); [S.videos, S.ingest] = await Promise.all([api.getVideos(), api.getIngest()]); if (S.ingest.feeds.some(f => f.active)) pollVideos(); if (S.videos.some(v => v.status !== 'ready' && v.status !== 'failed')) pollVideos(); }
 } catch (e) {
   $('#app').innerHTML = `<main class="boot-fail"><p class="eyebrow">Could not start</p><h1 class="claim">The local server did not answer as expected.</h1>
     <p class="dim">${esc(e.message)}</p><p>Close this window and open <b>Video Intelligence.exe</b> again; it restarts an outdated server.</p></main>`;

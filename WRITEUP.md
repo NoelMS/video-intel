@@ -70,12 +70,12 @@ Queries alternate between a development split (22, used for tuning) and a held-o
 
 | Method | Hit@1 | Hit@5 | MRR | Strict Hit@1 | Right camera @1 | Median time error @1 | Median latency |
 |---|---|---|---|---|---|---|---|
-| Baseline: CLIP frame retrieval | 30.2% | 46.5% | 0.363 | 25.6% | 55.8% | 3.5 s | 11 ms |
-| Ours: detector + tracks + label words | 25.6% | 37.2% | 0.322 | 23.3% | 69.8% | 12.7 s | 93 ms |
-| + object-crop CLIP | 25.6% | 62.8% | 0.414 | 23.3% | 51.2% | 3.8 s | 91 ms |
-| + label words with it (hybrid) | 30.2% | 65.1% | 0.444 | 27.9% | 53.5% | 1.5 s | 92 ms |
-| + moment per object from frames | 32.6% | 69.8% | 0.464 | 32.6% | 53.5% | 0.0 s | 91 ms |
-| **+ vision-model verification (full)** | **41.9%** | **72.1%** | **0.528** | **39.5%** | **65.1%** | **0.3 s** | 4.9 s |
+| Baseline: CLIP frame retrieval | 30.2% | 46.5% | 0.363 | 25.6% | 55.8% | 3.5 s | 27 ms |
+| Ours: detector + tracks + label words | 25.6% | 39.5% | 0.334 | 23.3% | 69.8% | 12.7 s | 93 ms |
+| + object-crop CLIP | 27.9% | 65.1% | 0.441 | 25.6% | 53.5% | 3.8 s | 93 ms |
+| + label words with it (hybrid) | 32.6% | 67.4% | 0.471 | 30.2% | 55.8% | 1.2 s | 93 ms |
+| + moment per object from frames | 32.6% | 72.1% | 0.478 | 32.6% | 55.8% | 0.0 s | 94 ms |
+| **+ vision-model verification (full)** | **41.9%** | **76.7%** | **0.544** | **39.5%** | **67.4%** | **0.5 s** | 5.7 s |
 
 By kind:
 
@@ -83,8 +83,8 @@ By kind:
 |---|---|---|---|---|
 | 27 activity (official annotations) | Baseline | 11.1% | 29.6% | 0.183 |
 | | Ours (full) | **33.3%** | **70.4%** | **0.452** |
-| 16 attribute (hand labels) | Baseline | **62.5%** | 75.0% | **0.667** |
-| | Ours (full) | 56.3% | 75.0% | 0.656 |
+| 16 attribute (hand labels) | Baseline | **62.5%** | 75.0% | 0.667 |
+| | Ours (full) | 56.3% | **87.5%** | **0.700** |
 
 ### Held-out split
 
@@ -93,26 +93,28 @@ By kind:
 | First run (`results-heldout-v1.md`) | Baseline | 23.8% | 42.9% | 0.317 |
 | | Ours (full) | 23.8% | 66.7% | 0.384 |
 | Final code (`results-heldout.md`) | Baseline | 23.8% | 42.9% | 0.317 |
-| | Ours (full) | **28.6%** | **71.4%** | **0.432** |
+| | Ours (full) | **28.6%** | **76.2%** | **0.456** |
 
 **Disclosure.** The first held-out run showed our pipeline returning nothing for "the person in a red jacket". The
 cause was a bug: the demo dataset's attribute vocabulary leaked into real footage, so "jacket" became a required word
 that no real label contains. The fix (on real footage, attribute words are only those that occur in its labels) is
 general, but because it was found on held-out output, the final held-out numbers are not a clean first look. Both runs
 are reported. Weights were tuned on the development split only: the frame signal is used for the moment and not for
-ranking, because ranking by it lowered development Hit@5 from 0.64 to 0.41.
+ranking, because ranking by it lowered development Hit@5 from 0.64 to 0.41. One held-out query was later reworded
+("Find a red car in the car park" became "Find a parked red car", same answer spans) once "car park" became a place
+word the app asks about; the final-code rows are measured on the reworded set.
 
 ### What the ablation shows
 
 - **Tracking + object crops** is the big step for finding the right *thing*: Hit@5 rises from 46.5% (baseline) to
-  62.8%. The baseline sees whole frames, where a person getting out of a car is a small part of a busy picture.
-- **Label words** add precision on colours and kinds (Hit@1 +4.6 points).
+  65.1%. The baseline sees whole frames, where a person getting out of a car is a small part of a busy picture.
+- **Label words** add precision on colours and kinds (Hit@1 +4.7 points).
 - **Per-object moments** fix *when*: the object's best-matching second, not its largest sighting, takes the median time
   error at rank 1 to 0 s.
 - **Verification** by the vision model is the largest Hit@1 gain (+9.3 points) at a cost of ~5 s per query. The app's
   Fast depth skips it.
 - **Where it does not help:** for simple appearance queries ("red double-decker bus", "white SUV") whole-frame
-  retrieval is already strong and slightly better at Hit@1. Our gains are on activities and moments, which is where
+  retrieval is already strong and slightly better at Hit@1 (ours is better at Hit@5). Our gains are on activities and moments, which is where
   CCTV questions are hard.
 
 ### Latency

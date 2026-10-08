@@ -71,6 +71,10 @@ export const sourcesMeva = prefix => j('sources/meva?prefix=' + encodeURICompone
 export const addFeeds = items => j('feeds', { method: 'POST', body: { items } });
 export const updateFeed = (id, patch) => j('feeds/' + id, { method: 'PUT', body: patch });
 export const captureFeed = (id, clipSec) => j(`feeds/${id}/capture`, { method: 'POST', body: clipSec ? { clipSec } : {} });
+export const pauseAllCapture = paused => j('capture', { method: 'PUT', body: { paused } });
+export const evalAnswers = text => j('eval/answers?text=' + encodeURIComponent(text));
+export const evalSummary = () => j('eval/summary');
+export const baselineSearch = (text, k = 5) => j('baseline/search', { method: 'POST', body: { text, k } });
 export const removeFeed = id => j('feeds/' + id, { method: 'DELETE' });
 export const addImports = body => j('imports', { method: 'POST', body });
 export const clearImports = () => j('imports', { method: 'DELETE' });

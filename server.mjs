@@ -170,7 +170,7 @@ function validImports(b) {
       cameraKey: 'url-' + createHash('sha1').update(b.camera ? cam : u).digest('hex').slice(0, 12) };
   });
 }
-const ingest = () => ({ feeds: sources.listFeeds().map(f => ({ ...f, fastWhy: sources.fastWhy(f) })), imports: sources.listImports(), backlog: indexer.backlog(), maxBacklog: sources.MAX_BACKLOG, attribution: sources.ATTRIBUTION });
+const ingest = () => ({ capturePaused: sources.allPaused(), feeds: sources.listFeeds().map(f => ({ ...f, fastWhy: sources.fastWhy(f) })), imports: sources.listImports(), backlog: indexer.backlog(), maxBacklog: sources.MAX_BACKLOG, attribution: sources.ATTRIBUTION });
 
 // The active dataset follows settings.source: the demo, or "My footage" rebuilt whenever indexed videos change.
 let mine = null, mineKey = null;
@@ -251,6 +251,20 @@ const routes = [
     return sources.meva(p);
   }],
   ['GET', /^ingest$/, () => ingest()],
+  // The evaluation set's known answer for a question, if it is one of eval/queries.json (shown next to a result), and the
+  // benchmark table from eval/results-all.md (System page). Read-only.
+  ['GET', /^eval\/answers$/, (_, __, url) => {
+    const norm = t => String(t || '').toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim(), want = norm(url.searchParams.get('text'));
+    const q = existsSync(join(root, 'eval', 'queries.json')) ? JSON.parse(readFileSync(join(root, 'eval', 'queries.json'), 'utf8')).queries.find(x => norm(x.text) === want) : null;
+    return q ? { id: q.id, kind: q.kind, source: q.source, split: q.split, answers: q.answers } : {};
+  }],
+  ['GET', /^eval\/summary$/, () => {
+    const f = join(root, 'eval', 'results-all.md');
+    if (!existsSync(f)) return { rows: [] };
+    const md = readFileSync(f, 'utf8');
+    const lines = md.split(/\r?\n/);
+    return { title: lines[0].replace(/^#\s*/, ''), rows: lines.filter(l => /^\| (Baseline|Ours)/.test(l)).map(l => l.split('|').slice(1, -1).map(c => c.trim())) };
+  }],
   // the comparison baseline (baseline.mjs): CLIP frame retrieval over the same footage
   ['POST', /^baseline\/search$/, async req => { const b = await body(req); if (typeof b.text !== 'string' || !b.text.trim() || b.text.length > 500) bad('text must be 1-500 characters'); return baseline.baselineSearch(b.text, { k: Math.min(50, Math.max(1, +b.k || 10)), scope: b.scope || 'all' }); }],
   ['POST', /^feeds$/, async req => ({ added: sources.addFeeds(validFeeds(await body(req))).length, ...ingest() })],
@@ -265,6 +279,7 @@ const routes = [
   }],
   ['POST', /^feeds\/([\w-]+)\/capture$/, async (req, [id]) => { const b = await body(req); sources.captureNow(id, b.clipSec == null ? null : validClipSec(b.clipSec)); return ingest(); }],
   ['DELETE', /^feeds\/([\w-]+)$/, (_, [id]) => { sources.removeFeed(id); return ingest(); }],
+  ['PUT', /^capture$/, async req => { const b = await body(req); if (typeof b.paused !== 'boolean') bad('paused must be boolean'); sources.pauseAll(b.paused); return ingest(); }],
   ['POST', /^imports$/, async req => { sources.addImports(validImports(await body(req))); return ingest(); }],
   ['DELETE', /^imports$/, () => { sources.clearImports(); return ingest(); }],
   ['GET', /^videos$/, () => indexer.listVideos()],

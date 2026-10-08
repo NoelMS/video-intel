@@ -328,7 +328,7 @@ ES modules need an http origin. Opening `index.html` from disk will not work.
     - Queries: 27 activity queries from MEVA annotations plus 16 hand-labelled attribute queries, alternating dev/held-out.
     - `eval.mjs` switches the search day per query (MEVA is 2018, TfL 2026).
     - Ablation switches go through the search request (`ablation: { image, frames, labels, verify, weights }`, evaluation only).
-  - **Results** (all 43 queries, full vs baseline): Hit@1 41.9% vs 30.2%, Hit@5 72.1% vs 46.5%, MRR 0.528 vs 0.363, median time error 0.3 s vs 3.5 s, latency ~5 s vs ~11 ms (~90 ms without verification).
+  - **Results** (all 43 queries, full vs baseline): Hit@1 41.9% vs 30.2%, Hit@5 76.7% vs 46.5%, MRR 0.544 vs 0.363, median time error 0.5 s vs 3.5 s (re-run after the "parked red car" rewording), latency ~5 s vs ~11 ms (~90 ms without verification).
     - Activities gain most: Hit@5 29.6% to 70.4%. On attributes the baseline is slightly better at Hit@1.
     - The held-out first run tied on Hit@1; the vocabulary fix (below) was found on held-out output, and both runs are reported in WRITEUP.md.
   - **Tuning (dev only)**: `OPEN_VOCAB = { object: 0.5, frame: 0, labels: 0.5, pass: 0.75 }`. The frame similarity picks each object's moment (`result.moments`, clip time) but is not used for ranking: ranking by it hurt (dev Hit@5 0.64 -> 0.41 at 0.2).
@@ -360,6 +360,14 @@ ES modules need an http origin. Opening `index.html` from disk will not work.
 - **Review of the collaborator's live-page commits** (`bd04faa`, `f622764`, `6cf425d`): `check.mjs`, `check-live.mjs` and a headless Live page test pass (three live cameras listed and offered as standing-query scopes; Start capture took a clip within 10 s; Stop restored the schedule; no page errors; the demo view renders).
   - **Fixed**: `fastWhy` let any active standing query covering a camera switch it to fast capture during its hours, including the demo's seeded queries, which are still stored in real stores and name demo places ("the rear entrance", "the loading area"). Every real camera would have gone to 30 s polling or continuous recording every morning. A query naming a place now only speeds up the camera that place is defined on (`covers`); check.mjs covers it.
   - **Note**: a user's own all-camera standing query (e.g. "Man with blue jacket", 20:00-06:00) puts every live camera on fast capture for those hours by design. That is a lot of indexing; segments beyond the backlog limit are dropped.
+
+- **Showing the improvement in the app, place words, time label, pause all**:
+  - **Baseline beside every answer** (server mode, not the demo): `comparePanel` under a result runs `POST baseline/search` (k = 5) and shows its top 5 frames. If the question is in `eval/queries.json` (`GET eval/answers?text=`, normalised text match), both systems are marked ✓/✗ against the labelled spans (right camera, time within the span ±5 s; ours ranks the shown answer, then the rest retrieved minus rejected). Questions outside the set say "compare by eye".
+  - **System → BENCHMARK**: the rows of `eval/results-all.md` (`GET eval/summary`). Re-running `eval/eval.mjs --split all` updates it.
+  - **Place words**: "junction", "crossing", "roundabout", "car park", "bus stop", "platform", "bridge", etc. now trigger the clarify-once question, and "cross/across/over" count as passing through. The hand-labelled "Find a red car in the car park" became "Find a parked red car" (it would otherwise ask where the car park is).
+  - **Time label**: "in the last hour" is measured back from the end of the day's footage, not from now. The TIME row now says "last 1 h of the footage (21:30 → 21:35, all of it)", so a 5-minute archive isn't mistaken for a parsing error.
+  - **Pause all capture** (`PUT capture {paused}`, `sources.pauseAll`, `vi.capturePaused`): one button on Live and on the Cameras live section. It stops the scheduler tick and every continuous recorder (finished segments are still queued); per-camera pause state is kept and returns on resume. `GET ingest` reports `capturePaused`.
+  - **Verified** headlessly (copies of the stores on N:): texting (held-out) ours ✓ #1, baseline ✓ #5; talking ours ✓ #1, baseline ✓ #1; an unlisted question shows "compare by eye"; the benchmark table shows 6 rows; "cross the junction" asks where the junction is; Pause/Resume all flips `capturePaused` from both pages. No page errors.
 
 ## Footage sources (researched)
 

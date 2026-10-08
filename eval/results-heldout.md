@@ -4,12 +4,12 @@ Hit = right camera and a time within the answer span +-5 s (strict: +-2 s). Foot
 
 | Method | Hit@1 | Hit@5 | MRR | Strict Hit@1 | Right camera @1 | Median time error @1 (s) | Median latency (ms) | p90 latency (ms) |
 |---|---|---|---|---|---|---|---|---|
-| Baseline: CLIP frame retrieval (1 frame/s) | 23.8% | 42.9% | 0.317 | 19.0% | 52.4% | 12.0 | 26 | 30 |
-| Ours: detector + tracks + label words | 19.0% | 33.3% | 0.267 | 14.3% | 61.9% | 14.3 | 93 | 109 |
-| Ours: detector + tracks + object-crop CLIP | 14.3% | 66.7% | 0.350 | 14.3% | 38.1% | 5.3 | 92 | 109 |
-| Ours: + label words (objects + labels) | 23.8% | 71.4% | 0.412 | 23.8% | 42.9% | 1.2 | 78 | 111 |
-| Ours: + frame context and moment per object | 23.8% | 71.4% | 0.395 | 23.8% | 42.9% | 0.0 | 93 | 108 |
-| Ours: + vision-model verification (full) | 28.6% | 71.4% | 0.432 | 28.6% | 57.1% | 0.0 | 5706 | 8113 |
+| Baseline: CLIP frame retrieval (1 frame/s) | 23.8% | 42.9% | 0.317 | 19.0% | 52.4% | 12.0 | 15 | 19 |
+| Ours: detector + tracks + label words | 19.0% | 33.3% | 0.267 | 14.3% | 61.9% | 14.3 | 94 | 110 |
+| Ours: detector + tracks + object-crop CLIP | 14.3% | 71.4% | 0.374 | 14.3% | 42.9% | 5.4 | 93 | 109 |
+| Ours: + label words (objects + labels) | 23.8% | 76.2% | 0.436 | 23.8% | 47.6% | 1.2 | 94 | 110 |
+| Ours: + frame context and moment per object | 23.8% | 76.2% | 0.419 | 23.8% | 47.6% | 0.0 | 94 | 111 |
+| Ours: + vision-model verification (full) | 28.6% | 76.2% | 0.456 | 28.6% | 61.9% | 5.8 | 6398 | 8083 |
 
 <details><summary>Per query (rank of the first hit, -1 = none in the top 10; top result)</summary>
 
@@ -28,13 +28,13 @@ Hit = right camera and a time within the answer span +-5 s (strict: +-2 s). Foot
 | Find a car making a U-turn | -1 (MEVA G328 16:03:04) | -1 (MEVA G506 16:01:11) | -1 (MEVA G328 16:02:32) | -1 (MEVA G328 16:02:32) | -1 (MEVA G328 16:02:33) | -1 (MEVA G328 16:02:33) |
 | Find a car starting to drive off | 6 (MEVA G328 16:03:09) | 6 (MEVA G506 16:01:11) | 3 (MEVA G505 16:02:10) | 3 (MEVA G505 16:02:10) | 3 (MEVA G505 16:02:12) | 3 (MEVA G505 16:02:12) |
 | Find a car turning left | 6 (MEVA G328 16:03:09) | 1 (MEVA G506 16:01:11) | 3 (MEVA G505 16:02:10) | 3 (MEVA G505 16:02:10) | 4 (MEVA G505 16:02:08) | 4 (MEVA G505 16:02:08) |
-| Find a London taxi | 0 (Blackfriars Rd/St George 14:06:08) | -1 (Tower Bridge App./East Smithfield 14:05:00) | -1 (Tower Bridge App./East Smithfield 14:05:00) | -1 (Tower Bridge App./East Smithfield 14:05:00) | -1 (Tower Bridge App./East Smithfield 14:05:01) | -1 (Tower Bridge App./East Smithfield 14:05:01) |
+| Find a London taxi | 0 (Blackfriars Rd/St George 14:06:08) | -1 (Tower Bridge App./East Smithfield 14:05:01) | 1 (Piccadilly Circus 14:08:10) | 1 (Piccadilly Circus 14:08:10) | 1 (Piccadilly Circus 14:08:10) | 1 (Piccadilly Circus 14:08:10) |
 | Find the red car | -1 (Blackfriars Rd/St George 14:06:09) | 0 (Tower Bridge App./East Smithfield 14:05:03) | 1 (Oxford St/Orchard St 14:09:00) | 0 (Tower Bridge App./East Smithfield 14:05:03) | 0 (Tower Bridge App./East Smithfield 14:05:03) | 0 (Tower Bridge App./East Smithfield 14:05:03) |
 | Find the white flatbed truck with yellow chevrons | 2 (Tower Bridge App./East Smithfield 14:05:06) | 9 (Tower Bridge App./East Smithfield 14:05:07) | 0 (Piccadilly Circus 14:08:03) | 0 (Piccadilly Circus 14:08:03) | 0 (Piccadilly Circus 14:08:06) | 0 (Piccadilly Circus 14:08:06) |
 | Find the scooter rider in a white helmet | -1 (Blackfriars Rd/St George 14:06:02) | -1 (Tower Bridge App./East Smithfield 14:05:01) | 7 (Tower Bridge App./East Smithfield 14:05:00) | 3 (Tower Bridge App./East Smithfield 14:05:01) | 3 (Tower Bridge App./East Smithfield 14:05:07) | 1 (Tower Bridge App./East Smithfield 14:05:07) |
 | Find the white SUV | 0 (Tower Bridge App./East Smithfield 14:05:03) | 0 (Tower Bridge App./East Smithfield 14:05:07) | 1 (Piccadilly Circus 14:08:07) | 1 (Piccadilly Circus 14:08:07) | 1 (Piccadilly Circus 14:08:08) | 1 (Piccadilly Circus 14:08:08) |
 | Find the person in a red jacket | 0 (MEVA G505 16:03:32) | 0 (MEVA G506 16:02:37) | 0 (MEVA G505 16:03:36) | 0 (MEVA G505 16:03:36) | 0 (MEVA G505 16:03:32) | 0 (MEVA G505 16:03:32) |
-| Find the group of people walking across the car park | 2 (MEVA G505 16:03:48) | -1 (MEVA G506 16:01:11) | -1 (MEVA G328 16:00:48) | -1 (MEVA G328 16:00:48) | -1 (MEVA G328 16:00:51) | -1 (MEVA G506 16:03:46) |
-| Find a red car in the car park | 0 (MEVA G339 16:04:04) | 4 (MEVA G506 16:04:59) | 0 (MEVA G505 16:04:07) | 0 (MEVA G505 16:04:07) | 0 (MEVA G505 16:04:03) | 0 (MEVA G505 16:04:03) |
+| Find the group of people walking across the car park | 2 (MEVA G505 16:03:48) | -1 (-) | -1 (-) | -1 (-) | -1 (-) | -1 (-) |
+| Find a parked red car | 0 (MEVA G339 16:03:12) | 4 (MEVA G506 16:04:59) | 0 (MEVA G505 16:04:07) | 0 (MEVA G505 16:04:07) | 0 (MEVA G505 16:04:01) | 0 (MEVA G505 16:04:01) |
 
 </details>
