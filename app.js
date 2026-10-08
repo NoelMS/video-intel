@@ -22,7 +22,7 @@ const STRENGTH = { strong: 'LIKELY SAME ENTITY', likely: 'LIKELY CONTINUATION', 
 let cams = [], allEvents = [];
 const S = {
   view: 'search', phase: 'idle', query: '', scope: 'all', stages: [], interp: null, res: null, context: null, error: null,
-  memory: [], history: [], saved: [], notes: '', privacy: true, zoom: 0, jtab: 'sequence', resolver: null, layer: null, camFocus: null, abort: null,
+  memory: [], history: [], saved: [], notes: '', settings: api.DEFAULT_SETTINGS, depth: null, privacy: true, zoom: 0, jtab: 'sequence', resolver: null, layer: null, camFocus: null, abort: null,
 };
 const set = patch => { Object.assign(S, patch); render(); };
 
@@ -31,6 +31,7 @@ const still = (e, o = {}) => e?.still && !o.crop ? `<img class="frame" src="${es
   : frame(e ? e.cameraId : o.cameraId, { ev: e, privacy: S.privacy, ...o });
 
 // ---------- small pieces ----------
+const xopt = () => ({ cross: S.res?.diag?.cross !== false });
 const lv = v => `<span class="lv" data-n="${{ HIGH: 3, MEDIUM: 2, LOW: 1 }[v] ?? 0}"><i></i><i></i><i></i>${v}</span>`;
 const tick = c => `<li class="${c.ok ? 'ok' : 'no'}"><span aria-hidden="true">${c.ok ? '✓' : '✕'}</span><span class="sr-only">${c.ok ? 'Passed' : 'Failed'}: </span>${esc(c.text)}</li>`;
 const evRef = e => `<button class="ref mono" data-act="open" data-id="${e.id}">${cam(e.cameraId).code} · ${e.time}</button>`;
@@ -50,7 +51,7 @@ function density(c, clickable = false) {
 
 // ---------- header ----------
 function header() {
-  const nav = [['search', 'Search'], ['cameras', 'Cameras'], ['memory', 'Memory'], ['investigation', 'Investigation']];
+  const nav = [['search', 'Search'], ['cameras', 'Cameras'], ['memory', 'Memory'], ['investigation', 'Investigation'], ['system', 'System']];
   return `<a class="skip" href="#main">Skip to content</a>
   <header class="top">
     <button class="mark" data-act="go" data-view="search">Multi-Stream <b>Video Intelligence</b></button>
@@ -87,7 +88,7 @@ const composer = compact => `<form class="composer ${compact ? 'compact' : ''}" 
       <option value="all">All ${cams.length}</option>
       ${cams.map(c => `<option value="${c.id}" ${S.scope === c.id ? 'selected' : ''}>${c.code} · ${c.name}${c.status === 'offline' ? ' (offline)' : ''}</option>`).join('')}
     </select></label>
-    <span class="mono dim">09:00 → 10:00 ${TZ}</span>
+    <label class="mono">DEPTH <select name="depth" title="${esc(api.DEPTHS[S.depth ?? S.settings.depth].note)}">${Object.entries(api.DEPTHS).map(([k, d]) => `<option value="${k}" ${(S.depth ?? S.settings.depth) === k ? 'selected' : ''}>${d.label}</option>`).join('')}</select></label>
     ${S.phase === 'searching' ? '<button type="button" class="btn" data-act="cancel">Cancel search</button>' : '<button class="btn primary">Search</button>'}
   </div>
 </form>`;
@@ -148,8 +149,9 @@ function trail() {
       return `<li class="${state}" ${state === 'run' ? 'aria-current="step"' : ''}>
         <span class="tier mono">${tier}</span><span class="nm">${label}</span>
         <span class="ct mono">${s?.count ?? (state === 'run' ? '…' : '')}</span><span class="ms mono">${s ? s.ms + ' ms' : ''}</span>
-        <span class="bar"><i style="width:${w}%"></i></span>${s?.count != null ? `<span class="lab">${esc(s.label)}</span>` : ''}</li>`;
+        <span class="bar"><i style="width:${w}%"></i></span>${s && k !== 'interpreted' ? `<span class="lab">${esc(s.label)}</span>` : ''}</li>`;
     }).join('')}</ol>
+    ${S.res?.diag ? `<p class="trail-foot"><span class="mono dim">${api.DEPTHS[S.res.diag.depth].label.toUpperCase()} · ${S.res.ms} ms</span> <button class="txt" data-act="diag">Diagnostics</button></p>` : ''}
     <p class="sr-only" aria-live="polite">${cur ? 'Running ' + STAGES.find(x => x[0] === cur)[1] : S.res ? 'Search complete: ' + STATUS[S.res.status] : ''}</p></section>`;
 }
 
@@ -267,7 +269,7 @@ function journeyResult(r) {
 
 // ---------- evidence building blocks ----------
 function evidenceStack(e, q) {
-  const A = Object.fromEntries(api.assess(e, q)), c = cam(e.cameraId), ref = q?.location?.ref;
+  const A = Object.fromEntries(api.assess(e, q, xopt())), c = cam(e.cameraId), ref = q?.location?.ref;
   const j = api.journey(e.track), i = j.sightings.indexOf(e.id), prev = ev(j.sightings[i - 1]), next = ev(j.sightings[i + 1]);
   const layers = [
     ['VISUAL', 'What does it look like?', A['Visual match'], `${esc(e.label)}. Attributes: ${e.attrs.join(', ')}. Semantic match ${lv(A['Semantic match'])}`],
@@ -341,7 +343,7 @@ const compareGrid = (ids, q) => `<div class="compare" style="--n:${ids.length}">
     <button class="cand-frame" data-act="open" data-id="${id}" aria-label="Open candidate ${'ABC'[i]}">${still(e)}</button>
     <div class="crop">${still(e, { crop: true })}</div>
     <p class="t mono">${c.code} · ${e.time}</p><p>${esc(e.label)}</p>
-    <dl class="layers">${api.assess(e, q).map(([k, v]) => `<div><dt>${k}</dt><dd>${lv(v)}</dd></div>`).join('')}</dl>
+    <dl class="layers">${api.assess(e, q, xopt()).map(([k, v]) => `<div><dt>${k}</dt><dd>${lv(v)}</dd></div>`).join('')}</dl>
     ${degradation(e)}
     <div class="acts"><button class="btn" data-act="open" data-id="${id}">View evidence</button><button class="txt" data-act="follow" data-track="${e.track}">Follow</button></div></section>`; }).join('')}</div>`;
 
@@ -492,7 +494,7 @@ function openLayer(L) {
 }
 dlg.addEventListener('close', () => { stopPlay(); S.layer = null; dlg.innerHTML = ''; });
 
-const LAYERS = { evidence: evidenceLayer, compare: compareLayer, passport: passportLayer, resolver: () => resolver(S.resolver), palette: () => paletteLayer() };
+const LAYERS = { diag: () => diagLayer(), evidence: evidenceLayer, compare: compareLayer, passport: passportLayer, resolver: () => resolver(S.resolver), palette: () => paletteLayer() };
 
 function evidenceLayer({ id, off = 0, focus = false }) {
   const e = ev(id), c = cam(e.cameraId), q = S.res?.interp;
@@ -588,6 +590,76 @@ function passportLayer({ track }) {
     <div class="acts"><button class="btn" data-act="follow" data-track="${track}">Open journey</button></div>`;
 }
 
+// ---------- diagnostics (§66, §120, §121, §154) ----------
+function diagLayer() {
+  const r = S.res, d = r.diag, q = r.interp;
+  const role = id => r.primary === id ? 'PRIMARY' : r.candidates?.includes(id) ? 'CANDIDATE' : r.events?.includes(id) ? 'MATCHED'
+    : r.journey?.sightings.includes(id) ? 'SIGHTING' : r.alternatives?.includes(id) ? 'ALTERNATIVE' : r.rejected.some(x => x.id === id) ? 'REJECTED' : 'FILTERED';
+  const lat = r.funnel.map((s, i) => [STAGES.find(x => x[0] === s.stage)?.[1] ?? s.stage, s.count, s.ms - (r.funnel[i - 1]?.ms ?? 0)]);
+  const tracksHit = [...new Set([r.primary, ...(r.candidates || []), ...(r.events || [])].filter(Boolean).map(id => ev(id).track))];
+  const tier = (name, done) => `<div><dt>${name}</dt><dd class="mono">${done}</dd></div>`;
+  return `<header class="ev-top"><p class="eyebrow">SEARCH DIAGNOSTICS</p><button class="txt" data-act="close">Close · Esc</button></header>
+    <h2 class="claim">${STATUS[r.status]} <span class="mono dim">· ${api.DEPTHS[d.depth].label} search · ${r.ms} ms</span></h2>
+    <div class="diag-grid">
+      <section><p class="eyebrow">QUERY</p><dl class="kv">
+        <div><dt>Text</dt><dd>${esc(q.text)}</dd></div>
+        <div><dt>Interpretation</dt><dd class="mono">${esc(JSON.stringify({ entity: q.entity, attrs: q.attrs, location: q.location?.term ?? null, intent: q.intent, crossing: q.crossing, follow: q.follow?.track ?? null }))}</dd></div>
+        <div><dt>Window</dt><dd class="mono">${hm(r.window[0])} → ${hm(r.window[1])} ${TZ}</dd></div>
+        <div><dt>Pipeline</dt><dd class="mono">${Object.entries(d.pipeline).map(([k, v]) => `${k}=${esc(v)}`).join(' · ')}</dd></div></dl></section>
+      <section><p class="eyebrow">SEARCH COST</p><dl class="kv">
+        ${tier('FAST · broad retrieval', 'Complete')}${tier('PRECISE · temporal + spatial grounding', 'Complete')}${tier('DEEP · cross-camera validation', d.cross ? 'Complete' : 'Skipped (fast mode)')}</dl></section>
+      <section class="wide"><p class="eyebrow">RETRIEVAL · TOP-${d.topK === 999 ? 'ALL' : d.topK} CANDIDATES</p>
+        ${d.retrieved.length ? `<table><thead><tr><th scope="col">#</th><th scope="col">Event</th><th scope="col">Camera · time</th><th scope="col">Score</th><th scope="col">Outcome</th></tr></thead>
+        <tbody>${d.retrieved.map((x, i) => { const e = ev(x.id); return `<tr><td class="mono">${i + 1}</td><td><button class="txt" data-act="open" data-id="${e.id}">${esc(e.label)}</button></td>
+          <td class="mono">${cam(e.cameraId).code} · ${e.time}</td><td class="mono">${x.score.toFixed(3)}</td><td class="mono">${role(x.id)}</td></tr>`; }).join('')}</tbody></table>` : '<p class="dim">No candidates retrieved.</p>'}</section>
+      <section><p class="eyebrow">GROUNDING</p><dl class="kv">
+        <div><dt>Temporal</dt><dd class="mono">${r.primary ? `${hms(sec(ev(r.primary).time) - 8)} → ${hms(sec(ev(r.primary).time) + 8)}` : `${hm(r.window[0])} → ${hm(r.window[1])}`}</dd></div>
+        <div><dt>Spatial</dt><dd>${q.location?.ref ? `${esc(q.location.ref.name)} · ${cam(q.location.ref.cameraId).code} region` : 'No region constraint'}</dd></div>
+        <div><dt>Object tracks</dt><dd class="mono">${tracksHit.join(', ') || (r.journey ? r.journey.track : '—')}</dd></div>
+        <div><dt>Cross-camera</dt><dd>${!d.cross ? 'Not checked' : r.journey ? r.journey.transitions.map(t => t.strength).join(', ') || 'single sighting' : 'n/a'}</dd></div></dl></section>
+      <section><p class="eyebrow">LATENCY <span class="dim">· measured, includes demo stage delay</span></p>
+        <ol class="lat">${lat.map(([n, c, dt]) => `<li><span>${n}</span><span class="mono">${c ?? '—'}</span><span class="bar"><i style="width:${dt / r.ms * 100}%"></i></span><span class="mono">${dt} ms</span></li>`).join('')}
+        <li class="tot"><span>Total</span><span></span><span></span><span class="mono">${r.ms} ms</span></li></ol></section>
+    </div>`;
+}
+
+// ---------- system (§64, §65, §67, §119) ----------
+function systemView() {
+  const covered = c => c.coverage.reduce((n, [a, b]) => n + Math.min(sec(b), W[1]) - Math.max(sec(a), W[0]), 0) / (W[1] - W[0]);
+  const avail = cams.filter(c => c.status !== 'offline'), p = S.settings.pipeline;
+  return `<section class="page"><header class="page-h"><p class="eyebrow">SYSTEM</p><h1>How the index stands.</h1>
+    <p class="lede">Search quality depends on what was indexed. Values are computed from the ${mode === 'server' ? 'server' : 'in-browser'} demo index.</p></header>
+    <section class="health" aria-label="System health"><dl class="kv">
+      <div><dt>Cameras</dt><dd>${avail.length} / ${cams.length} available</dd></div>
+      <div><dt>Index</dt><dd>Complete for available footage</dd></div>
+      <div><dt>Embeddings</dt><dd>${allEvents.length} events embedded</dd></div>
+      <div><dt>Tracks</dt><dd>${new Set(allEvents.map(e => e.track)).size} indexed</dd></div>
+      <div><dt>Memory</dt><dd>${S.memory.length} referents · ${mode}</dd></div></dl></section>
+    <section><p class="eyebrow">INDEX COVERAGE &amp; SYNC</p>
+      <table class="sys-t"><thead><tr><th scope="col">Camera</th><th scope="col">Coverage</th><th scope="col">Frames</th><th scope="col">Embeddings</th><th scope="col">Events</th><th scope="col">Clock offset</th><th scope="col">Failed segments</th></tr></thead>
+      <tbody>${cams.map(c => { const v = c.status === 'offline' ? 0 : covered(c), pct = Math.round(v * 100) + '%', holes = api.coverageGaps([{ ...c, status: 'ready' }], W);
+        return `<tr><th scope="row" class="mono">${c.code} <span class="dim">${c.name}</span></th><td><span class="meter" role="img" aria-label="${pct} covered"><i style="width:${v * 100}%"></i></span> <span class="mono">${pct}</span></td>
+          <td class="mono">${pct}</td><td class="mono">${pct}</td><td class="mono">${allEvents.filter(e => e.cameraId === c.id).length}</td>
+          <td class="mono">${fmtSync(c.sync)}${c.sync != null && Math.abs(c.sync) > 1 ? ' <span class="warn">DRIFT</span>' : ''}</td>
+          <td class="mono">${c.status === 'offline' ? 'camera offline' : holes.map(g => hm(g.from) + '–' + hm(g.to)).join(', ') || 'none'}</td></tr>`; }).join('')}</tbody></table></section>
+    <form class="settings" data-form="settings">
+      <fieldset><legend class="eyebrow">DEFAULT SEARCH DEPTH</legend>
+        ${Object.entries(api.DEPTHS).map(([k, d]) => `<label class="opt"><input type="radio" name="depth" value="${k}" ${S.settings.depth === k ? 'checked' : ''}><span><b>${d.label}</b> ${d.note}</span></label>`).join('')}</fieldset>
+      <fieldset><legend class="eyebrow">PIPELINE <span class="dim">· identifiers recorded with each search; the demo pipeline runs no models</span></legend>
+        ${[['embedding', 'Embedding model'], ['detector', 'Detector'], ['tracker', 'Tracker'], ['reid', 'Re-identification model']].map(([k, l]) => `<label class="fld">${l}<input name="${k}" value="${esc(p[k])}" maxlength="80" required></label>`).join('')}
+        <label class="fld">Frame sampling (fps)<input name="sampling" type="number" min="0.1" max="30" step="0.1" value="${p.sampling}" required></label>
+        <label class="fld">Temporal refinement window (± s)<input name="refinement" type="number" min="0" max="30" step="1" value="${p.refinement}" required></label></fieldset>
+      <div class="acts"><button class="btn primary">Save settings</button>${S.res ? '<button type="button" class="txt" data-act="diag">Last search diagnostics</button>' : ''}</div>
+    </form></section>`;
+}
+
+async function saveSettings(form) {
+  const fd = new FormData(form);
+  const pipeline = Object.fromEntries(['embedding', 'detector', 'tracker', 'reid', 'sampling', 'refinement'].map(k => [k, ['sampling', 'refinement'].includes(k) ? +fd.get(k) : fd.get(k)]));
+  try { S.settings = await api.setSettings({ depth: fd.get('depth'), pipeline }); S.depth = null; toast('Settings saved'); render(); }
+  catch (e) { toast(e.message); }
+}
+
 // ---------- command palette ----------
 const PAL = { items: [], i: 0 };
 const commands = () => [
@@ -636,7 +708,7 @@ async function run(text) {
   const ac = new AbortController();
   set({ view: 'search', phase: 'searching', query: text, stages: [], interp: null, res: null, error: null, abort: ac, zoom: 0 });
   try {
-    const res = await api.search(text, { scope: S.scope, context: S.context, signal: ac.signal,
+    const res = await api.search(text, { scope: S.scope, context: S.context, depth: S.depth ?? S.settings.depth, signal: ac.signal,
       onStage: s => { S.stages.push(s); if (s.interp) S.interp = s.interp; render(); } });
     S.res = res; S.interp = res.interp;
     S.history = await api.getHistory(); S.memory = await api.getMemory();
@@ -689,6 +761,7 @@ function cycleTheme() {
 
 const ACT = {
   theme: cycleTheme,
+  diag: () => openLayer({ kind: 'diag' }),
   go: d => go(d.view), ask: d => run(d.q), open: (d, el) => openEvidence(d.id, +(d.off || 0), el),
   close: () => dlg.close(), cancel: () => S.abort?.abort(), unfollow: () => set({ context: null }),
   privacy: () => set({ privacy: !S.privacy }), palette: () => openLayer({ kind: 'palette' }), zoom: d => zoomTo(+d.z),
@@ -727,10 +800,11 @@ dlg.addEventListener('click', e => {
 });
 
 document.addEventListener('submit', e => {
+  if (e.target.dataset.form === 'settings') { e.preventDefault(); return saveSettings(e.target); }
   if (e.target.dataset.form !== 'search') return;
   e.preventDefault();
   const fd = new FormData(e.target);
-  S.scope = fd.get('scope'); run(fd.get('q'));
+  S.scope = fd.get('scope'); S.depth = fd.get('depth'); run(fd.get('q'));
 });
 
 document.addEventListener('input', e => {
@@ -816,12 +890,12 @@ if (matchMedia('(hover: hover) and (pointer: fine)').matches && !reduced.matches
 }
 
 // ---------- render ----------
-const VIEWS = { search: searchView, cameras: camerasView, memory: memoryView, investigation: investigationView };
+const VIEWS = { search: searchView, cameras: camerasView, memory: memoryView, investigation: investigationView, system: systemView };
 function render() {
   const y = scrollY;
   $('#app').innerHTML = header() + `<main id="main" tabindex="-1">${VIEWS[S.view]()}</main>`;
   scrollTo(0, y);
 }
 
-[cams, allEvents, S.memory, S.history, S.saved, S.notes] = await Promise.all([api.getCameras(), api.getEvents(), api.getMemory(), api.getHistory(), api.getSaved(), api.getNotes()]);
+[cams, allEvents, S.memory, S.history, S.saved, S.notes, S.settings] = await Promise.all([api.getCameras(), api.getEvents(), api.getMemory(), api.getHistory(), api.getSaved(), api.getNotes(), api.getSettings()]);
 render();

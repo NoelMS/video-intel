@@ -42,11 +42,24 @@ function validRef(r, partial = false) {
   return out;
 }
 
+function validSettings(b) {
+  const out = {};
+  if (b.depth != null) { if (!api.DEPTHS[b.depth]) bad('depth must be fast, balanced or deep'); out.depth = b.depth; }
+  if (b.pipeline != null) {
+    out.pipeline = {};
+    for (const k of ['embedding', 'detector', 'tracker', 'reid']) if (k in b.pipeline) { const v = b.pipeline[k]; if (typeof v !== 'string' || !v.trim() || v.length > 80) bad(`${k} must be 1-80 characters`); out.pipeline[k] = v.trim(); }
+    if ('sampling' in b.pipeline) { const v = +b.pipeline.sampling; if (!(v >= 0.1 && v <= 30)) bad('sampling must be 0.1-30 fps'); out.pipeline.sampling = v; }
+    if ('refinement' in b.pipeline) { const v = +b.pipeline.refinement; if (!Number.isInteger(v) || v < 0 || v > 30) bad('refinement must be 0-30 s'); out.pipeline.refinement = v; }
+  }
+  return out;
+}
+
 const runs = new Map(); // search id -> { events, done, listeners, ac }
 function startSearch({ text, scope = 'all', context = null, depth }) {
   if (typeof text !== 'string' || !text.trim() || text.length > 500) bad('text must be 1-500 characters');
   if (scope !== 'all' && !api.camera(scope)) bad('unknown scope');
   if (context && !api.object(context.track)?.name) bad('unknown context track');
+  if (depth != null && !api.DEPTHS[depth]) bad('depth must be fast, balanced or deep');
   const id = Math.random().toString(36).slice(2, 10), run = { events: [], done: false, listeners: new Set(), ac: new AbortController() };
   const push = (type, data) => { run.events.push([type, data]); run.listeners.forEach(l => l(type, data)); if (type !== 'stage') run.done = true; };
   api.search(text, { scope, context, depth, signal: run.ac.signal, onStage: s => push('stage', s) })
@@ -74,6 +87,8 @@ const routes = [
   ['DELETE', /^saved\/([\w-]+)$/, async (_, [id]) => { await api.removeEvidence(id); return { ok: true }; }],
   ['GET', /^notes$/, async () => ({ text: await api.getNotes() })],
   ['PUT', /^notes$/, async req => { const b = await body(req); if (typeof b.text !== 'string' || b.text.length > 20000) bad('text must be a string under 20k'); await api.setNotes(b.text); return { ok: true }; }],
+  ['GET', /^settings$/, () => api.getSettings()],
+  ['PUT', /^settings$/, async req => api.setSettings(validSettings(await body(req)))],
   ['POST', /^search$/, async req => ({ id: startSearch(await body(req)) })],
   ['DELETE', /^search\/(\w+)$/, (_, [id]) => { runs.get(id)?.ac.abort(); return { ok: true }; }],
 ];

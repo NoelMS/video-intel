@@ -53,6 +53,8 @@ ES modules need an http origin. Opening `index.html` from disk will not work.
 
 - **Server**: `server.mjs` + `remote.js` + `service.js`. `api.js` storage is pluggable via `useStorage()`, and the server plugs in a JSON file store. The search runs server-side and stages stream over SSE; abort maps to `DELETE /api/search/:id`. The client keeps working against static hosting through the mock fallback.
 
+- **Depth, settings, diagnostics, System page**: `DEPTHS` in `api.js` (fast = top 3 with no cross-camera stage and no delay for the skipped stage; balanced = top 8; deep = all candidates plus 6 rejected). Depth comes from the composer select, else `settings.depth`. `GET/PUT /api/settings` is validated in `server.mjs`. Every result carries `diag` (depth, topK, retrieved ids with scores, pipeline identifiers). The diagnostics layer (`diagLayer`) shows retrieval outcomes, grounding, search cost tiers and per-stage latency deltas. The System view covers health, per-camera coverage, sync drift, failed segments, default depth and the pipeline form. Model identifiers are provenance only; no models run.
+
 ## Next up
 
-Live mode (honest simulation), standing queries and alerts, diagnostics drawer, pipeline settings, upload and camera registration, opening sequence, evidence board.
+Privacy controls, live mode (honest simulation), standing queries and alerts, upload and camera registration, opening sequence, evidence board.

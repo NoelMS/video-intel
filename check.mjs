@@ -32,6 +32,12 @@ assert.equal(r.status, 'refusal');
 r = await s('Did anyone enter the lobby after 9:40?');                              // flow 8
 assert.equal(r.status, 'empty'); assert.ok(r.coverage.some(g => g.cameraId === 'cam_07' && g.kind === 'gap'));
 
+r = await s('Did a red car pass through the main gate?', { depth: 'fast' });          // §155 depth has a real effect
+assert.equal(r.diag.cross, false); assert.equal(r.funnel.find(f => f.stage === 'cross_camera').count, null);
+assert.equal(api.assess(api.event(r.primary), r.interp, { cross: false }).at(-1)[1], 'NOT CHECKED');
+r = await s('Find a red car', { depth: 'deep' });
+assert.equal(r.diag.retrieved.length, 6); assert.equal(r.status, 'supported');
+
 // server: persistence + validation + SSE stages
 const { start } = await import('./server.mjs');
 const { tmpdir } = await import('node:os');

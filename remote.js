@@ -35,3 +35,5 @@ export async function search(text, { onStage = () => {}, signal, ...opts } = {})
     es.onerror = () => { if (es.readyState === EventSource.CLOSED) return; es.close(); reject(new Error('Lost connection to the search service. Your query is preserved.')); };
   });
 }
+export const getSettings = () => j('settings');
+export const setSettings = patch => j('settings', { method: 'PUT', body: patch });

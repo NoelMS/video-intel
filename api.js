@@ -57,6 +57,27 @@ export async function saveEvidence(eventId, query) {
 }
 export const removeEvidence = async id => save('vi.saved', (await getSaved()).filter(x => x.eventId !== id));
 
+// GET/PUT /settings. Model identifiers are recorded for provenance; the demo pipeline runs no models.
+export const DEPTHS = {
+  fast: { label: 'Fast', topK: 3, cross: false, speed: 0.5, note: 'Top 3 candidates, no cross-camera validation. Quickest answer.' },
+  balanced: { label: 'Balanced', topK: 8, cross: true, speed: 1, note: 'Top 8 candidates with cross-camera validation.' },
+  deep: { label: 'Deep', topK: 999, cross: true, speed: 1.6, note: 'Every candidate expanded and validated. Slowest.' },
+};
+export const DEFAULT_SETTINGS = {
+  depth: 'balanced',
+  pipeline: { embedding: 'clip-vit-l14', detector: 'open-vocab-detector', tracker: 'bytetrack', reid: 'osnet-reid', sampling: 2, refinement: 4 },
+};
+export async function getSettings() {
+  const s = load('vi.settings', {});
+  return Object.fromEntries(Object.entries(DEFAULT_SETTINGS).map(([k, v]) => [k, typeof v === 'object' ? { ...v, ...s[k] } : s[k] ?? v]));
+}
+export async function setSettings(patch) {
+  const cur = await getSettings();
+  const next = Object.fromEntries(Object.entries(cur).map(([k, v]) => [k, typeof v === 'object' ? { ...v, ...patch[k] } : patch[k] ?? v]));
+  save('vi.settings', next);
+  return next;
+}
+
 // ---------- geometry ----------
 export const pointAt = (e, t) => [0, 1].map(i => e.path[0][i] + (e.path[1][i] - e.path[0][i]) * t);
 export function pathHits(e, [x, y, w, h]) {
@@ -160,7 +181,7 @@ export function journey(track) {
   return { track, entity: s[0].entity, sightings: s.map(e => e.id), transitions };
 }
 
-export function assess(e, q) {
+export function assess(e, q, { cross = true } = {}) {
   const tr = journey(e.track).transitions.filter(t => t.from === e.id || t.to === e.id);
   const ref = q?.location?.ref;
   return [
@@ -168,7 +189,7 @@ export function assess(e, q) {
     ['Visual match', level(e.conf.visual)],
     ['Temporal fit', q && !inWin(e, [q.after ?? W[0], q.before ?? W[1]]) ? 'LOW' : 'HIGH'],
     ['Location fit', !ref ? 'N/A' : e.cameraId !== ref.cameraId ? 'LOW' : pathHits(e, ref.region) ? 'HIGH' : 'MEDIUM'],
-    ['Cross-camera link', !tr.length ? 'NONE' : tr.some(t => t.strength === 'strong') ? 'HIGH' : 'MEDIUM'],
+    ['Cross-camera link', !cross ? 'NOT CHECKED' : !tr.length ? 'NONE' : tr.some(t => t.strength === 'strong') ? 'HIGH' : 'MEDIUM'],
   ];
 }
 
@@ -181,12 +202,13 @@ const wait = (ms, signal) => new Promise((res, rej) => {
   signal?.addEventListener('abort', abort, { once: true });
 });
 
-export async function search(text, { scope = 'all', context = null, onStage = () => {}, signal, speed = 1 } = {}) {
+export async function search(text, { scope = 'all', context = null, depth, onStage = () => {}, signal, speed = 1 } = {}) {
   const t0 = Date.now();
-  const refs = await getMemory();
+  const refs = await getMemory(), settings = await getSettings();
+  const dk = DEPTHS[depth] ? depth : settings.depth, dp = DEPTHS[dk];
   const funnel = [];
-  const step = async (stage, label, count, extra) => {
-    await wait(DELAY[stage] * speed, signal); // ponytail: simulated latency for the demo pipeline; real stages arrive via SSE
+  const step = async (stage, label, count, extra, delay = DELAY[stage]) => {
+    await wait(delay * speed * dp.speed, signal); // ponytail: simulated latency for the demo pipeline; real stages arrive via SSE
     const s = { stage, label, count, ms: Date.now() - t0, ...extra };
     funnel.push(s); onStage(s);
   };
@@ -204,27 +226,30 @@ export async function search(text, { scope = 'all', context = null, onStage = ()
   await step('retrieval', `Indexed segments across ${searched.length} camera${searched.length === 1 ? '' : 's'}`, Math.floor(coveredSec / 10));
 
   const pool = D.events.filter(e => searched.some(c => c.id === e.cameraId));
-  const semantic = pool.filter(e => (!q.entity || e.entity === q.entity) && q.attrs.every(a => e.attrs.includes(a)) && (!q.follow || e.track === q.follow.track));
-  await step('semantic', 'Semantic matches', semantic.length);
+  const semantic = pool.filter(e => (!q.entity || e.entity === q.entity) && q.attrs.every(a => e.attrs.includes(a)) && (!q.follow || e.track === q.follow.track))
+    .sort((a, b) => score(b) - score(a)).slice(0, dp.topK);
+  await step('semantic', `Semantic matches · top ${dp.topK === 999 ? 'all' : dp.topK}`, semantic.length);
   const timed = semantic.filter(e => inWin(e, win));
   await step('temporal', 'Inside requested window', timed.length);
   const grounded = q.location ? timed.filter(e => e.cameraId === q.location.ref.cameraId) : timed;
   await step('grounding', q.location ? `Grounded at ${q.location.ref.name}` : 'Grounded objects', grounded.length);
   const tracks = new Set(grounded.map(e => e.track));
-  await step('cross_camera', 'Tracks seen on more than one camera', [...tracks].filter(t => new Set(D.events.filter(e => e.track === t).map(e => e.cameraId)).size > 1).length);
+  if (dp.cross) await step('cross_camera', 'Tracks seen on more than one camera', [...tracks].filter(t => new Set(D.events.filter(e => e.track === t).map(e => e.cameraId)).size > 1).length);
+  else await step('cross_camera', 'Skipped in fast mode', null, null, 0);
 
   const needCross = q.location && q.crossing && q.intent === 'find';
   const verified = grounded.filter(e => !needCross || pathHits(e, q.location.ref.region));
   const keep = new Set(verified.map(e => e.track));
   const rejected = semantic.filter(e => !keep.has(e.track) && !verified.includes(e))
-    .filter((e, i, a) => a.findIndex(x => x.track === e.track) === i).slice(0, 3)
+    .filter((e, i, a) => a.findIndex(x => x.track === e.track) === i).slice(0, dk === 'deep' ? 6 : 3)
     .map(e => ({ id: e.id, checks: checks(e, q, win) }));
   await step('verification', 'Verified against evidence', verified.length);
 
   const byTrack = new Map();
   for (const e of [...verified].sort((a, b) => score(b) - score(a))) if (!byTrack.has(e.track)) byTrack.set(e.track, e);
   const best = [...byTrack.values()];
-  const base = { interp: q, window: win, scoped: scoped.map(c => c.id), coverage, rejected, funnel, ms: Date.now() - t0 };
+  const diag = { depth: dk, cross: dp.cross, topK: dp.topK, pipeline: settings.pipeline, retrieved: semantic.map(e => ({ id: e.id, score: +score(e).toFixed(3) })) };
+  const base = { interp: q, window: win, scoped: scoped.map(c => c.id), coverage, rejected, funnel, diag, ms: Date.now() - t0 };
 
   let res;
   if (q.intent === 'journey' && (q.follow || best.length)) {

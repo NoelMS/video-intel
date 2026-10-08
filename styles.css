@@ -395,3 +395,26 @@ dialog.palette { width: min(640px, 92vw); margin-top: 12vh; padding: 0; }
   dialog.layer { width: 100vw; max-width: none; height: 100vh; max-height: none; margin: 0; border-radius: 0; padding: 16px; }
   dialog.evidence { padding: 0; }
 }
+
+/* diagnostics + system */
+.trail-foot { display: flex; justify-content: space-between; align-items: baseline; padding-top: 10px; font-size: 11px; }
+.diag-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 36px 44px; }
+.diag-grid .wide { grid-column: 1 / -1; }
+.diag-grid table td, .diag-grid table th { font-size: 13px; padding: 7px 10px; }
+.diag-grid thead th { position: static; }
+.lat li { display: grid; grid-template-columns: 1fr 44px 1fr 72px; gap: 10px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+.lat .bar { height: 3px; background: var(--line); position: relative; } .lat .bar i { position: absolute; inset: 0 auto 0 0; background: var(--accent); }
+.lat .mono { text-align: right; font-size: 12px; } .lat .tot { font-weight: 700; border-bottom: 0; }
+.sys-t { margin-bottom: 48px; } .sys-t th[scope=row] { font-weight: 500; white-space: nowrap; }
+.meter { display: inline-block; width: 90px; height: 4px; background: var(--line); position: relative; vertical-align: middle; margin-right: 6px; }
+.meter i { position: absolute; inset: 0 auto 0 0; background: var(--text-2); }
+.settings { display: grid; gap: 36px; max-width: 880px; }
+.settings fieldset { border: 0; padding: 0; margin: 0; display: grid; gap: 10px; }
+.settings legend { margin-bottom: 12px; }
+.opt { display: flex; gap: 12px; align-items: baseline; padding: 10px 0; border-bottom: 1px solid var(--line); color: var(--text-2); cursor: pointer; }
+.opt b { color: var(--text); margin-right: 8px; } .opt input { accent-color: var(--accent); }
+.fld { display: grid; grid-template-columns: 260px 1fr; gap: 16px; align-items: center; font-size: 14px; color: var(--text-2); }
+.fld input, .fld select { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r1); padding: 8px 10px; font-family: var(--mono); font-size: 13px; }
+@media (max-width: 1080px) { .diag-grid { grid-template-columns: 1fr; } .fld { grid-template-columns: 1fr; gap: 4px; } }
+.sys > * { white-space: nowrap; }
+@media (max-width: 1440px) { .sys .dim { display: none; } }
