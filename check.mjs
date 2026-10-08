@@ -38,6 +38,16 @@ assert.equal(api.assess(api.event(r.primary), r.interp, { cross: false }).at(-1)
 r = await s('Find a red car', { depth: 'deep' });
 assert.equal(r.diag.retrieved.length, 6); assert.equal(r.status, 'supported');
 
+// §68 privacy: expiry/retention enforced on read; reveal needs supervisor and is audited
+const old = new Date(Date.now() - 100 * 864e5).toISOString();
+const kv = new Map([['vi.saved', JSON.stringify([{ eventId: 'ev_091412', savedAt: old }])], ['vi.history', JSON.stringify([{ text: 'x', at: old, status: 'empty', n: 0 }])]]);
+api.useStorage({ getItem: k => kv.get(k) ?? null, setItem: (k, v) => kv.set(k, v) });
+assert.equal((await api.getSaved())[0].expired, true); assert.equal((await api.getHistory()).length, 0);
+await assert.rejects(api.addAudit({ action: 'reveal', eventId: 'ev_091412' }), /supervisor/);
+await api.setSettings({ operator: { role: 'supervisor' } });
+await api.addAudit({ action: 'reveal', eventId: 'ev_091412', role: 'supervisor' });
+assert.equal((await api.getAudit()).length, 1);
+
 // server: persistence + validation + SSE stages
 const { start } = await import('./server.mjs');
 const { tmpdir } = await import('node:os');
@@ -50,6 +60,8 @@ assert.equal((await call('memory', 'POST', { name: 'East Gate', cameraId: 'cam_0
 const [, { id }] = await call('search', 'POST', { text: 'Did anyone enter the east gate?' });
 const sse = await (await fetch(base + `search/${id}/events`)).text();
 assert.match(sse, /event: stage/); assert.match(sse, /event: result\ndata: .*"status":"supported"/);
+assert.equal((await call('audit', 'POST', { action: 'reveal', eventId: 'ev_091412' }))[0], 403, 'analyst cannot reveal');
+assert.equal((await call('settings', 'PUT', { privacy: { exports: 'leak' } }))[0], 400);
 srv.close();
 srv = await start(0, store);                                                         // restart: memory persists
 const mem = await (await fetch(`http://localhost:${srv.address().port}/api/memory`)).json();

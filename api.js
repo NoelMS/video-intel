@@ -47,15 +47,25 @@ export async function deleteMemory(id) {
 }
 
 // Investigation notebook: history, saved evidence, notes.
-export const getHistory = async () => load('vi.history', []);
-export const getSaved = async () => load('vi.saved', []);
+// Retention and expiry are enforced on read, so a stale record is never served as current.
+const ageDays = iso => (Date.now() - new Date(iso)) / 864e5;
+export const getHistory = async () => { const { privacy } = await getSettings(); return load('vi.history', []).filter(h => ageDays(h.at) <= privacy.retentionDays); };
+export const getSaved = async () => { const { privacy } = await getSettings(); return load('vi.saved', []).map(x => ({ ...x, expired: ageDays(x.savedAt) > privacy.expiryDays })); };
+export const getAudit = async () => load('vi.audit', []);
+export async function addAudit(entry) {
+  if (entry.action === 'reveal' && (await getSettings()).operator.role !== 'supervisor')
+    throw Object.assign(new Error('Revealing protected regions requires the supervisor role'), { status: 403 });
+  const row = { at: new Date().toISOString(), ...entry };
+  save('vi.audit', [row, ...load('vi.audit', [])].slice(0, 200));
+  return row;
+}
 export const getNotes = async () => load('vi.notes', '');
 export const setNotes = async t => save('vi.notes', t);
 export async function saveEvidence(eventId, query) {
-  const s = await getSaved();
+  const s = load('vi.saved', []);
   if (!s.some(x => x.eventId === eventId)) save('vi.saved', [...s, { eventId, query, savedAt: new Date().toISOString() }]);
 }
-export const removeEvidence = async id => save('vi.saved', (await getSaved()).filter(x => x.eventId !== id));
+export const removeEvidence = async id => save('vi.saved', load('vi.saved', []).filter(x => x.eventId !== id));
 
 // GET/PUT /settings. Model identifiers are recorded for provenance; the demo pipeline runs no models.
 export const DEPTHS = {
@@ -66,7 +76,11 @@ export const DEPTHS = {
 export const DEFAULT_SETTINGS = {
   depth: 'balanced',
   pipeline: { embedding: 'clip-vit-l14', detector: 'open-vocab-detector', tracker: 'bytetrack', reid: 'osnet-reid', sampling: 2, refinement: 4 },
+  privacy: { faces: true, plates: true, onPrem: true, retentionDays: 30, expiryDays: 90, exports: 'watermarked' },
+  operator: { role: 'analyst' },
 };
+export const ROLES = ['viewer', 'analyst', 'supervisor'];
+export const EXPORTS = { allowed: 'Allowed', watermarked: 'Watermarked', disabled: 'Disabled' };
 export async function getSettings() {
   const s = load('vi.settings', {});
   return Object.fromEntries(Object.entries(DEFAULT_SETTINGS).map(([k, v]) => [k, typeof v === 'object' ? { ...v, ...s[k] } : s[k] ?? v]));
@@ -248,7 +262,7 @@ export async function search(text, { scope = 'all', context = null, depth, onSta
   const byTrack = new Map();
   for (const e of [...verified].sort((a, b) => score(b) - score(a))) if (!byTrack.has(e.track)) byTrack.set(e.track, e);
   const best = [...byTrack.values()];
-  const diag = { depth: dk, cross: dp.cross, topK: dp.topK, pipeline: settings.pipeline, retrieved: semantic.map(e => ({ id: e.id, score: +score(e).toFixed(3) })) };
+  const diag = { depth: dk, cross: dp.cross, topK: dp.topK, pipeline: { ...settings.pipeline, onPrem: settings.privacy.onPrem }, retrieved: semantic.map(e => ({ id: e.id, score: +score(e).toFixed(3) })) };
   const base = { interp: q, window: win, scoped: scoped.map(c => c.id), coverage, rejected, funnel, diag, ms: Date.now() - t0 };
 
   let res;
@@ -265,8 +279,7 @@ export async function search(text, { scope = 'all', context = null, depth, onSta
     res = { ...base, status: 'ambiguous', candidates: best.slice(0, 3).map(e => e.id) };
   }
 
-  const h = await getHistory();
-  save('vi.history', [{ text, at: new Date().toISOString(), status: res.status, n: verified.length }, ...h].slice(0, 50));
+  save('vi.history', [{ text, at: new Date().toISOString(), status: res.status, n: verified.length }, ...load('vi.history', [])].slice(0, 50));
   if (q.location?.ref) await updateMemory(q.location.ref.id, { uses: (q.location.ref.uses || 0) + 1, lastUsed: today() });
   return res;
 }

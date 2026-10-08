@@ -22,13 +22,18 @@ const STRENGTH = { strong: 'LIKELY SAME ENTITY', likely: 'LIKELY CONTINUATION', 
 let cams = [], allEvents = [];
 const S = {
   view: 'search', phase: 'idle', query: '', scope: 'all', stages: [], interp: null, res: null, context: null, error: null,
-  memory: [], history: [], saved: [], notes: '', settings: api.DEFAULT_SETTINGS, depth: null, privacy: true, zoom: 0, jtab: 'sequence', resolver: null, layer: null, camFocus: null, abort: null,
+  memory: [], history: [], saved: [], notes: '', settings: api.DEFAULT_SETTINGS, depth: null, reveal: false, audit: [], zoom: 0, jtab: 'sequence', resolver: null, layer: null, camFocus: null, abort: null,
 };
 const set = patch => { Object.assign(S, patch); render(); };
 
 // Real footage hook: an event with `still` (image URL) renders it instead of the synthetic frame.
 const still = (e, o = {}) => e?.still && !o.crop ? `<img class="frame" src="${esc(e.still)}" alt="${esc(e.label)}">`
-  : frame(e ? e.cameraId : o.cameraId, { ev: e, privacy: S.privacy, ...o });
+  : frame(e ? e.cameraId : o.cameraId, { ev: e, privacy: pv(), ...o });
+// Masking is on unless turned off in settings or temporarily revealed by a supervisor (audited).
+const pv = () => ({ faces: S.settings.privacy.faces && !S.reveal, plates: S.settings.privacy.plates && !S.reveal });
+const maskable = e => e.entity === 'person' ? S.settings.privacy.faces : S.settings.privacy.plates;
+const exportBlock = () => S.settings.privacy.exports === 'disabled' ? 'Export is disabled by privacy policy'
+  : S.settings.operator.role === 'viewer' ? 'The viewer role cannot export evidence' : null;
 
 // ---------- small pieces ----------
 const xopt = () => ({ cross: S.res?.diag?.cross !== false });
@@ -61,7 +66,7 @@ function header() {
       <span class="dim">INDEX COMPLETE</span>
       <span class="dim" title="${mode === 'server' ? 'Persisted by server.mjs' : 'Persisted in this browser only'}">STORE ${mode.toUpperCase()}</span>
       ${DEMO ? '<span class="demo" title="Footage, detections and timings are synthetic">DEMO DATA</span>' : ''}
-      <button class="txt" data-act="privacy" aria-pressed="${S.privacy}">Blur ${S.privacy ? 'on' : 'off'}</button>
+      <button class="txt" data-act="go" data-view="system" title="Privacy settings">Privacy ${pv().faces || pv().plates ? 'on' : 'off'}</button>
       <button class="txt" data-act="theme" >Theme ${theme()}</button>
       <button class="txt" data-act="palette" aria-label="Open command menu">Ctrl K</button>
     </div>
@@ -106,7 +111,7 @@ function searchView() {
     <aside class="hero-r" aria-label="Camera landscape">
       <p class="eyebrow">CAMERA LANDSCAPE</p>
       <ul class="archive">${cams.map(c => `<li><button class="arc" data-act="camera" data-id="${c.id}">
-        <span class="arc-still">${frame(c.id, { time: '09:00:00', privacy: S.privacy })}</span>
+        <span class="arc-still">${frame(c.id, { time: '09:00:00' })}</span>
         <span class="arc-meta"><b class="mono">${c.code}</b> ${c.name} <span class="mono st-${c.status}">${statusWord(c)}</span></span>
         ${density(c)}</button></li>`).join('')}</ul>
     </aside>
@@ -132,7 +137,7 @@ function interpretation() {
 }
 
 const referentChip = r => `<details class="refchip"><summary>${esc(r.name)} <span class="mono dim">${cam(r.cameraId).code} · saved visual referent</span></summary>
-  ${frame(r.cameraId, { region: { rect: r.region, name: r.name }, time: '09:00:00', privacy: S.privacy })}
+  ${frame(r.cameraId, { region: { rect: r.region, name: r.name }, time: '09:00:00' })}
   <p class="mono dim">Defined by ${esc(r.definedBy)} · ${fmtDate(r.created)} · used in ${r.uses} searches</p></details>`;
 
 const STAGES = [['interpreted', 'Interpret', ''], ['retrieval', 'Fast retrieval', 'FAST'], ['semantic', 'Semantic match', 'FAST'], ['temporal', 'Temporal filter', 'PRECISE'],
@@ -400,7 +405,7 @@ function camerasView() {
       <div><dt>Visual memory</dt><dd>${S.memory.length} referents</dd></div></dl></section>
     <table class="cams"><thead><tr><th scope="col">Camera</th><th scope="col">Status</th><th scope="col">Activity 09:00 → 10:00</th><th scope="col">Indexed</th><th scope="col">Clock offset</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
     <tbody>${cams.map(c => `<tr id="row-${c.id}" class="${S.camFocus === c.id ? 'focus' : ''}">
-      <th scope="row"><span class="thumb">${frame(c.id, { time: '09:00:00', privacy: S.privacy })}</span><span><b class="mono">${c.code}</b> ${c.name}</span></th>
+      <th scope="row"><span class="thumb">${frame(c.id, { time: '09:00:00' })}</span><span><b class="mono">${c.code}</b> ${c.name}</span></th>
       <td class="mono st-${c.status}">${statusWord(c)}</td><td>${density(c, true)}</td><td class="mono">${indexed(c)}</td><td class="mono">${fmtSync(c.sync)}</td>
       <td><button class="txt" data-act="scope" data-id="${c.id}" ${c.status === 'offline' ? 'disabled' : ''}>Search this camera</button></td></tr>`).join('')}</tbody></table>
     ${timeline()}</section>`;
@@ -411,7 +416,7 @@ function memoryView() {
     <p class="lede">Places defined once and resolved in every query that names them. ${S.memory.length} referent${S.memory.length === 1 ? '' : 's'}.</p>
     <button class="btn" data-act="define">Define a referent</button></header>
     <ol class="refs">${S.memory.map(r => { const c = cam(r.cameraId); return `<li class="ref-item">
-      <figure>${frame(r.cameraId, { region: { rect: r.region, name: r.name }, time: '09:00:00', privacy: S.privacy })}</figure>
+      <figure>${frame(r.cameraId, { region: { rect: r.region, name: r.name }, time: '09:00:00' })}</figure>
       <div><h2>${esc(r.name)}</h2><p class="mono dim">${c.code} · ${c.name} · saved region</p>
       <dl class="kv"><div><dt>Defined by</dt><dd>${esc(r.definedBy)}</dd></div><div><dt>Source</dt><dd>${c.code}</dd></div>
         <div><dt>Region</dt><dd class="mono">x ${r.region[0]} · y ${r.region[1]} · w ${r.region[2]} · h ${r.region[3]}</dd></div>
@@ -424,9 +429,10 @@ function memoryView() {
 function investigationView() {
   return `<section class="page"><header class="page-h"><p class="eyebrow">INVESTIGATION</p><h1>Notebook.</h1>
     <p class="lede">${S.saved.length} saved evidence · ${S.history.length} searches. Stored ${mode === 'server' ? 'on the server' : 'in this browser'}.</p>
-    <button class="btn" data-act="export" ${S.saved.length ? '' : 'disabled'}>Export evidence package</button></header>
+    <button class="btn" data-act="export" ${!S.saved.some(x => !x.expired) || exportBlock() ? `disabled title="${exportBlock() ?? 'No unexpired evidence'}"` : ''}>Export evidence package</button></header>
     <div class="nb"><section><p class="eyebrow">EVIDENCE</p>
-      ${S.saved.length ? `<ol class="sheets">${S.saved.map(x => { const e = ev(x.eventId), c = cam(e.cameraId); return `<li class="sheet">
+      ${S.saved.length ? `<ol class="sheets">${S.saved.map(x => { const e = ev(x.eventId), c = cam(e.cameraId); return `<li class="sheet ${x.expired ? 'expired' : ''}">
+        ${x.expired ? `<p class="warn mono">EXPIRED · older than ${S.settings.privacy.expiryDays} days, excluded from export</p>` : ''}
         <button data-act="open" data-id="${e.id}" aria-label="Open ${c.code} ${e.time}">${still(e)}</button>
         <p class="t mono">${c.code} · ${e.time} ${TZ}</p><p>${esc(e.label)}</p><p class="mono dim">from “${esc(x.query || 'archive')}”</p>
         <button class="txt" data-act="unsave" data-id="${e.id}">Remove</button></li>`; }).join('')}</ol>` : '<p class="dim">Nothing saved yet. Use “Save evidence” in any evidence view.</p>'}
@@ -444,9 +450,9 @@ function resolver(R) {
       : `<header class="ev-top"><p class="eyebrow">${R.id ? 'REDEFINE' : 'DEFINE'} VISUAL REFERENT</p><button class="txt" data-act="close">Close · Esc</button></header>
       <h2 class="claim" id="res-h">${R.id ? esc(R.name) : 'A place the system should remember'}</h2>`}
     <ol class="res-cams" aria-label="Choose camera">${cams.filter(x => x.status !== 'offline').map(x => `<li><button data-act="res-cam" data-id="${x.id}" aria-pressed="${R.cameraId === x.id}">
-      ${frame(x.id, { time: '09:00:00', privacy: S.privacy })}<span class="mono">${x.code}</span> ${x.name}</button></li>`).join('')}</ol>
+      ${frame(x.id, { time: '09:00:00' })}<span class="mono">${x.code}</span> ${x.name}</button></li>`).join('')}</ol>
     ${c ? `<div class="res-draw"><p class="mono dim">${c.code} · ${c.name.toUpperCase()} · drag to select the area, or type the region</p>
-      <div class="res-canvas" data-draw>${frame(c.id, { time: '09:00:00', privacy: S.privacy })}
+      <div class="res-canvas" data-draw>${frame(c.id, { time: '09:00:00' })}
         <svg class="res-ov" viewBox="0 0 640 360" preserveAspectRatio="none" aria-hidden="true"><rect id="res-rect" ${R.rect ? `x="${R.rect[0]}" y="${R.rect[1]}" width="${R.rect[2]}" height="${R.rect[3]}"` : ''}/></svg></div>
       <div class="res-form">
         <fieldset><legend class="mono">REGION (frame px)</legend>${['x', 'y', 'w', 'h'].map((k, i) => `<label class="mono">${k} <input type="number" min="0" max="${i % 2 ? 360 : 640}" data-xywh="${i}" value="${R.rect?.[i] ?? ''}"></label>`).join('')}</fieldset>
@@ -492,7 +498,7 @@ function openLayer(L) {
   if (L.kind === 'palette') { palFilter(); $('#pal-q').focus(); }
   else dlg.querySelector('h2, [data-act=close]')?.focus?.();
 }
-dlg.addEventListener('close', () => { stopPlay(); S.layer = null; dlg.innerHTML = ''; });
+dlg.addEventListener('close', () => { stopPlay(); S.layer = null; S.reveal = false; dlg.innerHTML = ''; });
 
 const LAYERS = { diag: () => diagLayer(), evidence: evidenceLayer, compare: compareLayer, passport: passportLayer, resolver: () => resolver(S.resolver), palette: () => paletteLayer() };
 
@@ -530,8 +536,10 @@ function evidenceLayer({ id, off = 0, focus = false }) {
         <div class="acts">
           <button class="btn primary" data-act="save" data-id="${id}">Save evidence</button>
           <button class="btn" data-act="follow" data-track="${e.track}">Follow this ${noun}</button>
-          <button class="txt" data-act="exportone" data-id="${id}">Export evidence</button>
-          <button class="txt" disabled title="No source video in the demo build">Download clip</button></div>
+          <button class="txt" data-act="exportone" data-id="${id}" ${exportBlock() ? `disabled title="${exportBlock()}"` : ''}>Export evidence</button>
+          <button class="txt" disabled title="No source video in the demo build">Download clip</button>
+          ${maskable(e) ? `<button class="txt" data-act="reveal" data-id="${id}" ${S.settings.operator.role !== 'supervisor' && !S.reveal ? 'disabled title="Requires the supervisor role"' : ''}>${S.reveal ? 'Restore masking' : 'Reveal protected regions'}</button>` : ''}</div>
+        ${S.reveal ? '<p class="warn mono">PROTECTED REGIONS REVEALED · this view is logged in the audit trail</p>' : ''}
       </aside>
     </div></div>`;
 }
@@ -586,7 +594,7 @@ function passportLayer({ track }) {
       <div><dt>First seen</dt><dd class="mono">${cam(a.cameraId).code} · ${a.time}</dd></div><div><dt>Last seen</dt><dd class="mono">${cam(z.cameraId).code} · ${z.time}</dd></div>
       <div><dt>Sightings</dt><dd>${s.length}</dd></div><div><dt>Cross-camera continuity</dt><dd>${o.transitions.length} transition${o.transitions.length === 1 ? '' : 's'}${o.transitions.length ? ' · ' + o.transitions.map(t => t.strength).join(', ') : ''}</dd></div></dl>
     <ol class="pp">${s.map(e => `<li><button data-act="open" data-id="${e.id}" aria-label="Open ${cam(e.cameraId).code} ${e.time}">${still(e, { crop: true })}</button><span class="mono">${cam(e.cameraId).code} · ${e.time}</span></li>`).join('')}</ol>
-    ${o.entity === 'person' && S.privacy ? '<p class="mono dim">Faces blurred by privacy setting.</p>' : ''}
+    ${maskable({ entity: o.entity }) && !S.reveal ? `<p class="mono dim">${o.entity === 'person' ? 'Faces' : 'Plates'} masked by privacy setting.</p>` : ''}
     <div class="acts"><button class="btn" data-act="follow" data-track="${track}">Open journey</button></div>`;
 }
 
@@ -649,15 +657,44 @@ function systemView() {
         ${[['embedding', 'Embedding model'], ['detector', 'Detector'], ['tracker', 'Tracker'], ['reid', 'Re-identification model']].map(([k, l]) => `<label class="fld">${l}<input name="${k}" value="${esc(p[k])}" maxlength="80" required></label>`).join('')}
         <label class="fld">Frame sampling (fps)<input name="sampling" type="number" min="0.1" max="30" step="0.1" value="${p.sampling}" required></label>
         <label class="fld">Temporal refinement window (± s)<input name="refinement" type="number" min="0" max="30" step="1" value="${p.refinement}" required></label></fieldset>
+      <fieldset><legend class="eyebrow">PRIVACY</legend>
+        ${[['faces', 'Blur faces'], ['plates', 'Blur licence plates'], ['onPrem', 'On-premises inference only (recorded with every search)']].map(([k, l]) => `<label class="opt"><input type="checkbox" name="${k}" ${S.settings.privacy[k] ? 'checked' : ''}><span>${l}</span></label>`).join('')}
+        <label class="fld">Search history retention (days)<input name="retentionDays" type="number" min="1" max="3650" step="1" value="${S.settings.privacy.retentionDays}" required></label>
+        <label class="fld">Saved evidence expires after (days)<input name="expiryDays" type="number" min="1" max="3650" step="1" value="${S.settings.privacy.expiryDays}" required></label>
+        <label class="fld">Evidence export<select name="exports">${Object.entries(api.EXPORTS).map(([k, l]) => `<option value="${k}" ${S.settings.privacy.exports === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label></fieldset>
+      <fieldset><legend class="eyebrow">OPERATOR <span class="dim">· the demo has no sign-in, so the role is a setting</span></legend>
+        <label class="fld">Role<select name="role">${api.ROLES.map(r => `<option ${S.settings.operator.role === r ? 'selected' : ''}>${r}</option>`).join('')}</select></label>
+        <p class="dim">Viewers cannot export. Only supervisors can reveal masked regions, and every reveal is logged.</p></fieldset>
       <div class="acts"><button class="btn primary">Save settings</button>${S.res ? '<button type="button" class="txt" data-act="diag">Last search diagnostics</button>' : ''}</div>
-    </form></section>`;
+    </form>
+    <section class="audit"><p class="eyebrow">AUDIT TRAIL</p>${S.audit.length ? `<ol>${S.audit.map(a => `<li class="mono"><span>${new Date(a.at).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'medium' })}</span><span>${a.action.toUpperCase()}</span><span>${a.role}</span><button class="txt" data-act="open" data-id="${a.eventId}">${cam(ev(a.eventId).cameraId).code} · ${ev(a.eventId).time}</button></li>`).join('')}</ol>` : '<p class="dim">No protected regions have been revealed.</p>'}</section>
+  </section>`;
 }
 
 async function saveSettings(form) {
   const fd = new FormData(form);
   const pipeline = Object.fromEntries(['embedding', 'detector', 'tracker', 'reid', 'sampling', 'refinement'].map(k => [k, ['sampling', 'refinement'].includes(k) ? +fd.get(k) : fd.get(k)]));
-  try { S.settings = await api.setSettings({ depth: fd.get('depth'), pipeline }); S.depth = null; toast('Settings saved'); render(); }
-  catch (e) { toast(e.message); }
+  const privacy = { faces: fd.has('faces'), plates: fd.has('plates'), onPrem: fd.has('onPrem'), retentionDays: +fd.get('retentionDays'), expiryDays: +fd.get('expiryDays'), exports: fd.get('exports') };
+  try {
+    S.settings = await api.setSettings({ depth: fd.get('depth'), pipeline, privacy, operator: { role: fd.get('role') } });
+    S.depth = null; [S.history, S.saved] = await Promise.all([api.getHistory(), api.getSaved()]);
+    toast('Settings saved'); render();
+  } catch (e) { toast(e.message); }
+}
+
+async function togglePrivacy() {
+  const on = S.settings.privacy.faces || S.settings.privacy.plates;
+  S.settings = await api.setSettings({ privacy: { faces: !on, plates: !on } });
+  render(); toast(`Privacy masking ${on ? 'off' : 'on'}`);
+}
+
+async function reveal(id) {
+  if (S.reveal) { S.reveal = false; return openLayer({ ...S.layer, off: P.off }); }
+  try {
+    await api.addAudit({ action: 'reveal', eventId: id });
+    S.reveal = true; S.audit = await api.getAudit();
+    openLayer({ ...S.layer, off: P.off }); toast('Protected regions revealed · logged');
+  } catch (e) { toast(e.message); }
 }
 
 // ---------- command palette ----------
@@ -669,7 +706,7 @@ const commands = () => [
   ...(S.res?.candidates ? [['Compare candidates', () => openLayer({ kind: 'compare', ids: S.res.candidates })]] : []),
   ...(S.context ? [[`Open journey · ${tracks[S.context.track]}`, () => follow(S.context.track)]] : []),
   ['Define a visual referent', () => openResolver({})],
-  [`Turn privacy blur ${S.privacy ? 'off' : 'on'}`, () => set({ privacy: !S.privacy })],
+  [`Turn privacy masking ${S.settings.privacy.faces || S.settings.privacy.plates ? 'off' : 'on'}`, togglePrivacy],
   ['Export investigation', () => exportPackage()],
   ...cams.filter(c => c.status !== 'offline').map(c => [`Search ${c.code} · ${c.name}`, () => { S.scope = c.id; go('search'); focusQ(); }]),
   ...allEvents.map(e => [`Jump to ${cam(e.cameraId).code} ${e.time} · ${name(e)}`, () => openEvidence(e.id)]),
@@ -727,8 +764,12 @@ async function run(text) {
 }
 
 async function exportPackage(only) {
-  const items = only ? [{ eventId: only, query: S.query }] : S.saved;
-  const out = ['# Case evidence', '', DEMO ? '> DEMO DATA: synthetic footage and detections. Not real evidence.\n' : '', `Generated ${new Date().toISOString()}`, ''];
+  const why = exportBlock();
+  if (why) return toast(why);
+  const items = only ? [{ eventId: only, query: S.query }] : S.saved.filter(x => !x.expired), p = S.settings.privacy;
+  const out = ['# Case evidence', '', DEMO ? '> DEMO DATA: synthetic footage and detections. Not real evidence.\n' : '',
+    p.exports === 'watermarked' ? `> RESTRICTED · exported by role "${S.settings.operator.role}" on ${new Date().toISOString()} · do not redistribute\n` : '',
+    `Generated ${new Date().toISOString()} · faces ${p.faces ? 'masked' : 'unmasked'} · plates ${p.plates ? 'masked' : 'unmasked'}`, ''];
   for (const x of items) {
     const e = ev(x.eventId), c = cam(e.cameraId), j = api.journey(e.track);
     out.push(`## ${c.code} · ${e.time} ${TZ} · ${e.label}`, `- Camera: ${c.code} ${c.name} (clock offset ${fmtSync(c.sync)})`, `- Source clip: ${clipName(e)}`,
@@ -764,7 +805,7 @@ const ACT = {
   diag: () => openLayer({ kind: 'diag' }),
   go: d => go(d.view), ask: d => run(d.q), open: (d, el) => openEvidence(d.id, +(d.off || 0), el),
   close: () => dlg.close(), cancel: () => S.abort?.abort(), unfollow: () => set({ context: null }),
-  privacy: () => set({ privacy: !S.privacy }), palette: () => openLayer({ kind: 'palette' }), zoom: d => zoomTo(+d.z),
+  reveal: d => reveal(d.id), palette: () => openLayer({ kind: 'palette' }), zoom: d => zoomTo(+d.z),
   compare: d => openLayer({ kind: 'compare', ids: d.ids.split(',') }), bridge: d => openLayer({ kind: 'compare', ids: [d.from, d.to], bridge: true }),
   passport: d => openLayer({ kind: 'passport', track: d.track }), follow: d => follow(d.track), jtab: d => set({ jtab: d.tab }),
   save: async d => { await api.saveEvidence(d.id, S.query); S.saved = await api.getSaved(); toast('Evidence saved to investigation'); },
@@ -897,5 +938,5 @@ function render() {
   scrollTo(0, y);
 }
 
-[cams, allEvents, S.memory, S.history, S.saved, S.notes, S.settings] = await Promise.all([api.getCameras(), api.getEvents(), api.getMemory(), api.getHistory(), api.getSaved(), api.getNotes(), api.getSettings()]);
+[cams, allEvents, S.memory, S.history, S.saved, S.notes, S.settings, S.audit] = await Promise.all([api.getCameras(), api.getEvents(), api.getMemory(), api.getHistory(), api.getSaved(), api.getNotes(), api.getSettings(), api.getAudit()]);
 render();

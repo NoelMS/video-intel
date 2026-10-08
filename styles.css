@@ -418,3 +418,6 @@ dialog.palette { width: min(640px, 92vw); margin-top: 12vh; padding: 0; }
 @media (max-width: 1080px) { .diag-grid { grid-template-columns: 1fr; } .fld { grid-template-columns: 1fr; gap: 4px; } }
 .sys > * { white-space: nowrap; }
 @media (max-width: 1440px) { .sys .dim { display: none; } }
+.sheet.expired > button:first-of-type { opacity: .45; }
+.audit { margin-top: 56px; max-width: 880px; }
+.audit li { display: grid; grid-template-columns: 200px 90px 110px 1fr; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 12px; align-items: baseline; }

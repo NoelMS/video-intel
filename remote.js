@@ -37,3 +37,5 @@ export async function search(text, { onStage = () => {}, signal, ...opts } = {})
 }
 export const getSettings = () => j('settings');
 export const setSettings = patch => j('settings', { method: 'PUT', body: patch });
+export const getAudit = () => j('audit');
+export const addAudit = entry => j('audit', { method: 'POST', body: entry });

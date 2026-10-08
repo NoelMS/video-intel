@@ -51,6 +51,13 @@ function validSettings(b) {
     if ('sampling' in b.pipeline) { const v = +b.pipeline.sampling; if (!(v >= 0.1 && v <= 30)) bad('sampling must be 0.1-30 fps'); out.pipeline.sampling = v; }
     if ('refinement' in b.pipeline) { const v = +b.pipeline.refinement; if (!Number.isInteger(v) || v < 0 || v > 30) bad('refinement must be 0-30 s'); out.pipeline.refinement = v; }
   }
+  if (b.privacy != null) {
+    const p = b.privacy, o = out.privacy = {};
+    for (const k of ['faces', 'plates', 'onPrem']) if (k in p) { if (typeof p[k] !== 'boolean') bad(`${k} must be boolean`); o[k] = p[k]; }
+    for (const k of ['retentionDays', 'expiryDays']) if (k in p) { if (!Number.isInteger(p[k]) || p[k] < 1 || p[k] > 3650) bad(`${k} must be 1-3650 days`); o[k] = p[k]; }
+    if ('exports' in p) { if (!api.EXPORTS[p.exports]) bad('exports must be allowed, watermarked or disabled'); o.exports = p.exports; }
+  }
+  if (b.operator != null) { if (!api.ROLES.includes(b.operator.role)) bad('role must be viewer, analyst or supervisor'); out.operator = { role: b.operator.role }; }
   return out;
 }
 
@@ -89,6 +96,12 @@ const routes = [
   ['PUT', /^notes$/, async req => { const b = await body(req); if (typeof b.text !== 'string' || b.text.length > 20000) bad('text must be a string under 20k'); await api.setNotes(b.text); return { ok: true }; }],
   ['GET', /^settings$/, () => api.getSettings()],
   ['PUT', /^settings$/, async req => api.setSettings(validSettings(await body(req)))],
+  ['GET', /^audit$/, () => api.getAudit()],
+  ['POST', /^audit$/, async req => {
+    const b = await body(req);
+    if (b.action !== 'reveal' || !api.event(b.eventId)) bad('only reveal of a known eventId is audited');
+    return api.addAudit({ action: 'reveal', eventId: b.eventId, role: (await api.getSettings()).operator.role }); // api enforces the role (403)
+  }],
   ['POST', /^search$/, async req => ({ id: startSearch(await body(req)) })],
   ['DELETE', /^search\/(\w+)$/, (_, [id]) => { runs.get(id)?.ac.abort(); return { ok: true }; }],
 ];

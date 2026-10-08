@@ -55,22 +55,23 @@ function person(l, cx, cy, s, privacy) {
   };
 }
 
-// opts: ev, offset (s from event), box, trail, region {rect,name}, privacy, crop, label
-export function frame(cameraId, { ev = null, offset = 0, box = true, trail = false, region = null, privacy = true, crop = false, time = null } = {}) {
+// opts: ev, offset (s from event), box, trail, region {rect,name}, privacy {faces, plates}, crop, time
+export function frame(cameraId, { ev = null, offset = 0, box = true, trail = false, region = null, privacy = { faces: true, plates: true }, crop = false, time = null } = {}) {
   const c = camera(cameraId);
   const t = (offset + 8) / 16;
   let obj = null;
   if (ev && t >= 0 && t <= 1) {
     const [cx, cy] = pointAt(ev, t), s = 0.75 + (cy - 200) / 240;
-    obj = (ev.look.kind === 'vehicle' ? vehicle : person)(ev.look, cx, cy, s, privacy);
+    obj = ev.look.kind === 'vehicle' ? vehicle(ev.look, cx, cy, s, privacy.plates) : person(ev.look, cx, cy, s, privacy.faces);
   }
+  const masked = obj && (ev.look.kind === 'vehicle' ? privacy.plates && 'PLATE MASKED' : privacy.faces && 'FACE MASKED');
   const stamp = ev ? hms(sec(ev.time) + Math.round(offset)) : time ?? '';
   let vb = '0 0 640 360';
   if (crop && obj) {
     const [x, y, w, h] = obj.box, cw = Math.max(w, h * 1.6) * 1.5, ch = cw / 1.6;
     vb = `${x + w / 2 - cw / 2} ${y + h / 2 - ch / 2} ${cw} ${ch}`;
   }
-  const label = `${c.code} ${c.name}${stamp ? ' at ' + stamp : ''}${ev && obj ? ', ' + ev.label : ''}. Synthetic demo frame.`;
+  const label = `${c.code} ${c.name}${stamp ? ' at ' + stamp : ''}${ev && obj ? ', ' + ev.label : ''}.${masked ? ' ' + masked.toLowerCase() + '.' : ''} Synthetic demo frame.`;
   return `<svg class="frame" viewBox="${vb}" preserveAspectRatio="xMidYMid slice" role="img" aria-label="${label}">
     <defs><filter id="pv"><feGaussianBlur stdDeviation="3.2"/></filter></defs>
     <rect x="-400" y="-400" width="1440" height="1160" fill="${BG}"/><rect y="200" width="640" height="160" fill="${GROUND}"/>${L(0, 200, 640, 200)}
@@ -84,6 +85,7 @@ export function frame(cameraId, { ev = null, offset = 0, box = true, trail = fal
       <text x="${x}" y="${y - 6}" fill="${ACC}" font-size="10" font-family="IBM Plex Mono, monospace">${ev.track} · ${ev.entity.toUpperCase()}</text>`)(obj.box) : ''}
     ${crop ? '' : `<text x="14" y="24" fill="${TXT}" font-size="11" font-family="IBM Plex Mono, monospace" letter-spacing=".06em" opacity=".85">${c.code}  ${c.name.toUpperCase()}</text>
     <text x="626" y="24" fill="${TXT}" font-size="11" font-family="IBM Plex Mono, monospace" text-anchor="end" opacity=".85">${DAY} ${stamp} ${TZ}</text>
-    <text x="14" y="346" fill="${TXT}" font-size="9" font-family="IBM Plex Mono, monospace" opacity=".45">SYNTHETIC DEMO FRAME</text>`}
+    <text x="14" y="346" fill="${TXT}" font-size="9" font-family="IBM Plex Mono, monospace" opacity=".45">SYNTHETIC DEMO FRAME</text>
+    ${masked ? `<text x="626" y="346" fill="${TXT}" font-size="9" font-family="IBM Plex Mono, monospace" text-anchor="end" opacity=".7">${masked}</text>` : ''}`}
   </svg>`;
 }
