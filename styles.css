@@ -352,10 +352,10 @@ dialog.palette { width: min(640px, 92vw); margin-top: 12vh; padding: 0; }
 .top { view-transition-name: top; }
 ::view-transition-group(top) { animation: none; }
 ::view-transition-old(top) { display: none; } ::view-transition-new(top) { animation: none; }
-.vt-nav::view-transition-old(root) { animation: vt-out var(--med) var(--ease) both; }
-.vt-nav::view-transition-new(root) { animation: vt-in var(--slow) var(--ease) both; }
-@keyframes vt-out { to { opacity: 0; transform: translateX(calc(var(--vt-dir, 1) * -32px)); filter: blur(2px); } }
-@keyframes vt-in { from { opacity: 0; transform: translateX(calc(var(--vt-dir, 1) * 32px)); } }
+.vt-nav::view-transition-old(root) { animation: vt-out var(--fast) var(--ease) both; }
+.vt-nav::view-transition-new(root) { animation: vt-in var(--med) var(--ease) both; }
+@keyframes vt-out { to { opacity: 0; transform: translateX(calc(var(--vt-dir, 1) * -16px)); } }
+@keyframes vt-in { from { opacity: 0; transform: translateX(calc(var(--vt-dir, 1) * 16px)); } }
 ::view-transition-group(evidence) { animation-duration: var(--slow); animation-timing-function: var(--ease-emph); }
 
 @media (prefers-reduced-motion: reduce) {

@@ -144,6 +144,16 @@ ES modules need an http origin. Opening `index.html` from disk will not work.
     - MEVA G339: 71 detections.
     - "Find the white SUV" on the 2018 day: candidates confirmed by the model's visual check.
 
+- **Playback, empty-state and demo fixes** (`app.js`, `styles.css`):
+  - **Detection boxes**: `drawBoxes` used to rebuild `#vbox` with `innerHTML` on every animation frame. Now `videoLayer` builds one node per track once, and each frame only sets `hidden` and `left/top/width/height`. Frames where `currentTime` is unchanged (paused, between video frames) skip the update.
+  - **Page slide** is shorter (140 ms out, 280 ms in, 16 px) and no longer blurs the whole page. The app ignores input while a view transition runs.
+  - **Removing recordings** now calls `clearSearch()`. Before, the last result still pointed at deleted events, so drawing the Search page threw and the Search tab "did nothing". `switchDay` uses the same helper.
+  - **With nothing indexed**, the search composer still shows, the header line says so instead of "00:00 → 00:00 · 0 cameras", and a search returns "no supported evidence".
+  - **"Watch the demonstration"** (and its palette entry) only shows on demo data. The scripted intro uses the demo's events and threw on your own footage.
+  - **Verified in Chrome** against a stand-in model:
+    - Boxes move with playback, with no DOM node churn and none drawn on "Original".
+    - Delete a recording → Search → the page draws and searching works.
+
 ## Footage sources (researched)
 
 Live feeds (for the live-ingest stretch goal; all free, check each licence before redistributing):

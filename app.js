@@ -120,10 +120,10 @@ const composer = compact => `<form class="composer ${compact ? 'compact' : ''}" 
 function searchView() {
   if (S.phase === 'idle') return `<section class="hero">
     <div class="hero-l">
-      <p class="eyebrow">${ds().DAY} · ${hm(W[0])} → ${hm(W[1])} ${ds().TZ} · ${cams.length} camera${cams.length === 1 ? '' : 's'} · ${ds().DEMO ? 'demo footage' : 'your recordings'}</p>
+      <p class="eyebrow">${cams.length ? `${ds().DAY} · ${hm(W[0])} → ${hm(W[1])} ${ds().TZ} · ${cams.length} camera${cams.length === 1 ? '' : 's'} · ${ds().DEMO ? 'demo footage' : 'your recordings'}` : 'Your recordings · nothing indexed yet'}</p>
       <h1>Search every camera like you remember the moment.</h1>
       <p class="lede">Ask naturally. Find the moment. Follow the evidence.</p>
-      <button class="play-demo" data-act="intro"><span aria-hidden="true">▶</span> Watch the demonstration <span class="dim">6 s</span></button>
+      ${ds().DEMO ? `<button class="play-demo" data-act="intro"><span aria-hidden="true">▶</span> Watch the demonstration <span class="dim">6 s</span></button>` : ''}
       ${composer(false)}
       ${!ds().DEMO && !cams.length ? `<div class="empty-footage"><p><b>No indexed recordings yet.</b> Add recorded video and it is analysed on this computer.</p><button class="btn primary" data-act="register">Add a recording</button></div>` : ''}
       <ol class="starts" aria-label="Starting points">${(ds().DEMO ? STARTS : cams.length ? MINE_STARTS : []).map(([q, t], i) => `<li><button data-act="ask" data-q="${esc(q)}">
@@ -1007,7 +1007,7 @@ function videoLayer({ id, t = 0, det = true }) {
   V.evs = allEvents.filter(e => (e.vid ?? e.cameraId) === id && e.dets?.length);   // this clip's tracks
   V.det = det && V.evs.length > 0; V.gap = 1 / (sv?.sampling || 0.5);
   const seg = ([m, l]) => `<button data-act="vmode" data-m="${m}" aria-pressed="${(m === 'det') === V.det}" ${m === 'det' && !V.evs.length ? 'disabled title="Not indexed yet"' : ''}>${l}</button>`;
-  cancelAnimationFrame(V.raf); V.raf = requestAnimationFrame(drawBoxes);
+  cancelAnimationFrame(V.raf); V.t = null; V.raf = requestAnimationFrame(drawBoxes);
   return `<header class="ev-top"><p class="eyebrow">RECORDING · ${esc(c.name)}</p>
       <div><span class="mode" role="group" aria-label="Playback">${[['det', 'With detections'], ['orig', 'Original']].map(seg).join('')}</span>
       <button class="txt" data-act="close">Close · Esc</button></div></header>
@@ -1015,7 +1015,7 @@ function videoLayer({ id, t = 0, det = true }) {
     <div class="vplay" style="--ar:${c.width || 16}/${c.height || 9}">
       <video id="vplay" src="api/videos/${id}/play#t=${Math.max(0, +t - 3)}" controls autoplay muted playsinline
         onerror="this.parentNode.outerHTML='<p class=&quot;warn&quot;>This recording cannot be played. Re-index it to make a browser-playable copy.</p>'"></video>
-      <div id="vbox" aria-hidden="true"></div></div>
+      <div id="vbox" aria-hidden="true">${V.evs.map(e => `<div class="vb ${e.entity}" hidden><span>${tid(e.track)} · ${esc(e.label)}</span></div>`).join('')}</div></div>
     <p class="mono dim">${V.evs.length ? `${V.evs.length} tracked object${V.evs.length === 1 ? '' : 's'} · boxes are interpolated between frames sampled every ${V.gap}s. ` : ''}Privacy masks apply to extracted frames only, not to playback.</p>`;
 }
 // Box at time t: interpolated inside the track, held for half a sampling interval at either end.
@@ -1029,9 +1029,16 @@ function boxAt(ds, t) {
 function drawBoxes() {
   const v = $('#vplay'), box = $('#vbox');
   if (!v || !box || !dlg.open) return;
-  // dets are in camera time; a live/archive camera's clip starts e.t - e.vt seconds into it
-  box.innerHTML = !V.det ? '' : V.evs.map(e => { const b = boxAt(e.dets, v.currentTime + (e.vt != null ? e.t - e.vt : 0)); return b ? `<div class="vb ${e.entity}" style="left:${b[0] / 6.4}%;top:${b[1] / 3.6}%;width:${b[2] / 6.4}%;height:${b[3] / 3.6}%"><span>${tid(e.track)} · ${esc(e.label)}</span></div>` : ''; }).join('');
   V.raf = requestAnimationFrame(drawBoxes);
+  const t = V.det ? v.currentTime : -1;
+  if (t === V.t) return;   // paused or between video frames: nothing moved
+  V.t = t;
+  // dets are in camera time; a live/archive camera's clip starts e.t - e.vt seconds into it
+  [...box.children].forEach((n, i) => {
+    const e = V.evs[i], b = t >= 0 && boxAt(e.dets, t + (e.vt != null ? e.t - e.vt : 0));
+    n.hidden = !b;
+    if (b) n.style.cssText = `left:${b[0] / 6.4}%;top:${b[1] / 3.6}%;width:${b[2] / 6.4}%;height:${b[3] / 3.6}%`;
+  });
 }
 
 async function loadDataset() {
@@ -1041,10 +1048,11 @@ async function loadDataset() {
 }
 
 // Your footage is searched one day at a time (an archive and today's live captures do not share a time axis).
+const clearSearch = () => { S.abort?.abort(); Object.assign(S, { phase: 'idle', res: null, interp: null, stages: [], context: null, scope: 'all', zoom: 0 }); };
 async function switchDay(day) {
   S.settings = await api.setSettings({ day });
   await loadDataset();
-  Object.assign(S, { phase: 'idle', res: null, interp: null, stages: [], context: null, scope: 'all', zoom: 0 });
+  clearSearch();
   render(); toast(`Showing footage from ${new Date(day + 'T12:00Z').toLocaleDateString('en-GB', { dateStyle: 'medium' })}`);
 }
 
@@ -1268,7 +1276,7 @@ const commands = () => [
   ...(S.context ? [[`Open journey · ${ds().tracks[S.context.track]}`, () => follow(S.context.track)]] : []),
   ['Define a visual referent', () => openResolver({})],
   ['Open live (simulated replay)', () => go('live')],
-  ['Play the opening demonstration', () => playIntro()],
+  ...ds().DEMO ? [['Play the opening demonstration', () => playIntro()]] : [],
   [`Turn privacy masking ${S.settings.privacy.faces || S.settings.privacy.plates ? 'off' : 'on'}`, togglePrivacy],
   ['Export investigation', () => exportPackage()],
   ...cams.filter(c => c.status !== 'offline').map(c => [`Search ${c.code} · ${c.name}`, () => { S.scope = c.id; go('search', focusQ); }]),
@@ -1387,7 +1395,7 @@ const ACT = {
   setup: () => openSetup(),
   'setup-install': () => startInstall(),
   'setup-later': async () => { S.settings = await api.setSettings({ vision: { setupSeen: true } }); dlg.close(); },
-  intro: () => playIntro(),
+  intro: () => ds().DEMO && playIntro(),
   'intro-try': () => { dlg.close(); run('Did a red car pass through the main gate?'); },
   'pin-journey': async d => { await api.saveJourney(d.track, S.query); S.saved = await api.getSaved(); toast('Journey pinned to the evidence board'); },
   nudge: d => { const x = S.saved.find(i => i.id === d.id), lane = S.saved.filter(i => i.lane === x.lane); moveCard(d.id, x.lane, lane.indexOf(x) + +d.d); },
@@ -1405,7 +1413,7 @@ const ACT = {
     const vs = S.videos.filter(v => v.cameraKey === d.key);
     if (!confirm(`Remove “${vs[0].name}” and its ${vs.length} clips? Their frames and index are deleted.`)) return;
     for (const v of vs) await api.deleteVideo(v.id);
-    S.videos = await api.getVideos(); await loadDataset(); render();
+    S.videos = await api.getVideos(); await loadDataset(); clearSearch(); render();
   },
   source: d => switchSource(d.src),
   'play-orig': d => openLayer({ kind: 'video', id: d.id, t: +d.t, det: d.det !== '0' }),
@@ -1414,7 +1422,7 @@ const ACT = {
   'video-del': async d => {
     const v = S.videos.find(x => x.id === d.id);
     if (!confirm(`Remove “${v.name}”? The uploaded copy, its frames and its index are deleted.`)) return;
-    await api.deleteVideo(d.id); S.videos = await api.getVideos(); await loadDataset(); render();
+    await api.deleteVideo(d.id); S.videos = await api.getVideos(); await loadDataset(); clearSearch(); render();
   },
   'live-toggle': () => S.live.running ? S.live.ac.abort() : liveStart(),
   'live-reset': () => { S.live.ac?.abort(); Object.assign(S.live, { t: W[0], feed: [], streams: {}, done: false, lastAt: null }); render(); },
