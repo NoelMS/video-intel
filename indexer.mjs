@@ -430,22 +430,26 @@ const hms = s => [s / 3600, (s % 3600) / 60, s % 60].map(n => String(Math.floor(
 // One day at a time: footage from different days (an archive from 2018, live captures from today) cannot share the
 // seconds-since-midnight time axis, so the dataset is the chosen day's footage (default: the latest) and lists the rest.
 const camKey = v => v.cameraKey || v.id;
+// One clock for every camera: this computer's timezone. Each camera on its own local clock put a London capture at
+// 17:00 and a California capture made at the same moment at 09:00 on one axis, so the window spanned both and every
+// camera reported the other's hours as unsearched gaps. (Recording lists and playback still show each camera's zone.)
+const ZONE = Intl.DateTimeFormat().resolvedOptions().timeZone;
 export function dataset(pick = null) {
   const all = listVideos().filter(v => v.status === 'ready').sort((a, b) => a.start.localeCompare(b.start));
-  const dateOf = v => clockOf(v.start, v.tz).date, days = [...new Set(all.map(dateOf))].sort().reverse();
+  const dateOf = v => clockOf(v.start, ZONE).date, days = [...new Set(all.map(dateOf))].sort().reverse();
   const day = days.includes(pick) ? pick : days[0], ready = all.filter(v => dateOf(v) === day);
   if (!ready.length) return { source: 'mine', DEMO: false, DAY: new Date().toISOString().slice(0, 10), TZ: '', WINDOW: ['00:00:00', '00:00:01'], cameras: [], events: [], tracks: {}, days };
   const groups = new Map();
   for (const v of ready) groups.set(camKey(v), [...(groups.get(camKey(v)) || []), v]);
   const cameras = [], events = [], tracks = {};
   [...groups].forEach(([key, vs], i) => {
-    const t0 = clockOf(vs[0].start, vs[0].tz, day).sec;
+    const t0 = clockOf(vs[0].start, ZONE, day).sec;
     const cam = { id: key, code: `CAM ${String(i + 1).padStart(2, '0')}`, name: vs[0].name, location: vs[0].location, tz: vs[0].tz, status: 'ready', real: true,
       coverage: [], sync: 0, neighbors: [...new Set(vs.flatMap(v => v.neighbors || []))], width: vs[0].width, height: vs[0].height, t0, frames: [],
       clips: vs.length, source: vs[0].source || null };
     for (const v of vs) {
       // Recordings indexed before exactTimes show each frame's scene half a sampling interval after its stored time.
-      const late = v.exactTimes ? 0 : 0.5 / (v.sampling || 0.5), off = clockOf(v.start, v.tz, day).sec - t0;
+      const late = v.exactTimes ? 0 : 0.5 / (v.sampling || 0.5), off = clockOf(v.start, ZONE, day).sec - t0;
       const frames = (existsSync(detFile(v.id)) ? JSON.parse(readFileSync(detFile(v.id), 'utf8')) : []).map(f => ({ ...f, t: f.t + late }));
       cam.coverage.push([t0 + off, t0 + off + v.duration]);
       cam.frames.push(...frames.map(f => ({ n: f.n, v: v.id, t: +(off + f.t).toFixed(2), faces: f.faces, plates: f.plates })));
@@ -470,7 +474,7 @@ export function dataset(pick = null) {
   });
   linkAcrossCameras(events, cameras);
   const span = cameras.flatMap(c => c.coverage.flat().map(s => +s.split(':').reduce((h, x) => h * 60 + +x, 0)));
-  return { source: 'mine', DEMO: false, DAY: day, days, TZ: tzLabel(ready[0].tz, ready[0].start), WINDOW: [hms(Math.min(...span)), hms(Math.max(...span))], cameras, events, tracks };
+  return { source: 'mine', DEMO: false, DAY: day, days, TZ: tzLabel(ZONE, ready[0].start), WINDOW: [hms(Math.min(...span)), hms(Math.max(...span))], cameras, events, tracks };
 }
 const cap = s => s ? s[0].toUpperCase() + s.slice(1) : s;
 // The zone's name on the footage's own date (EST vs EDT), not today's.

@@ -221,10 +221,10 @@ function supported(r) {
 
 function ambiguous(r) {
   return `<article class="result">
-    <header class="answer"><p class="verdict amb" tabindex="-1">${r.candidates.length} PLAUSIBLE MATCHES</p>
+    <header class="answer"><p class="verdict amb" tabindex="-1">${r.candidates.length + (r.more?.length || 0)} PLAUSIBLE MATCHES</p>
       <h2 class="claim">The footage does not single out one ${r.interp.entity || 'candidate'}. Compare before concluding.</h2></header>
-    ${compareGrid(r.candidates, r.interp)}${negative(r)}
-    ${timeline({ hits: new Set(r.candidates), focus: ev(r.candidates[0]) })}${coverage(r)}
+    ${compareGrid(r.candidates, r.interp)}${moreMatches(r.more)}${negative(r)}
+    ${timeline({ hits: new Set([...r.candidates, ...(r.more || [])]), focus: ev(r.candidates[0]) })}${coverage(r)}
   </article>`;
 }
 
@@ -324,6 +324,8 @@ const negative = r => !r.rejected?.length ? '' : `<section class="negative"><p c
   return `<div class="rej"><button class="thumb" data-act="open" data-id="${e.id}" aria-label="Open rejected candidate ${e.time}">${still(e)}</button>
   <div><p><b>${esc(name(e))}</b> ${evRef(e)}</p><ul class="checks">${x.checks.map(tick).join('')}</ul></div></div>`; }).join('')}</section>`;
 
+const moreMatches = ids => !ids?.length ? '' : `<section class="alts"><p class="eyebrow">${ids.length} MORE MATCH${ids.length > 1 ? 'ES' : ''}</p>${ids.map(id => { const e = ev(id);
+  return `<div class="alt"><span>${esc(name(e))}</span> ${evRef(e)} <button class="txt" data-act="open" data-id="${id}">View evidence</button></div>`; }).join('')}</section>`;
 const alternatives = (ids, p) => !ids?.length ? '' : `<section class="alts"><p class="eyebrow">ALTERNATIVE${ids.length > 1 ? 'S' : ''}</p>${ids.map(id => { const e = ev(id);
   return `<div class="alt"><span>${esc(name(e))}</span> ${evRef(e)} <span class="mono dim">visual ${api.level(e.conf.visual)}</span> <button class="txt" data-act="compare" data-ids="${p.id},${id}">Compare side by side</button></div>`; }).join('')}</section>`;
 
@@ -375,10 +377,17 @@ const compareGrid = (ids, q) => `<div class="compare" style="--n:${ids.length}">
     ${degradation(e)}
     <div class="acts"><button class="btn" data-act="open" data-id="${id}">View evidence</button><button class="txt" data-act="follow" data-track="${e.track}">Follow</button></div></section>`; }).join('')}</div>`;
 
+// One line per camera. A live camera records a short clip every few minutes, so listing every gap between clips
+// buried the answer under dozens of lines; a camera with many gaps gets a summary instead.
 function coverage(r) {
-  return !r.coverage.length ? '' : `<section class="coverage"><p class="eyebrow warn">COVERAGE</p><ul>${r.coverage.map(g => { const c = cam(g.cameraId);
-    return g.kind === 'offline' ? `<li><b class="mono">${c.code}</b> OFFLINE, not searched. Available footage ${g.available.map(([a, b]) => a.slice(0, 5) + ' → ' + b.slice(0, 5)).join(', ')}.</li>`
-      : `<li><b class="mono">${c.code}</b> No footage indexed ${hm(g.from)} → ${hm(g.to)}. This interval was not searched.</li>`; }).join('')}</ul></section>`;
+  if (!r.coverage.length) return '';
+  const by = Map.groupBy(r.coverage, g => g.cameraId), [a, b] = r.window;
+  const line = (id, gs) => { const c = cam(id);
+    if (gs[0].kind === 'offline') return `<li><b class="mono">${c.code}</b> OFFLINE, not searched. Available footage ${gs[0].available.map(([x, y]) => x.slice(0, 5) + ' → ' + y.slice(0, 5)).join(', ')}.</li>`;
+    if (gs.length <= 2) return gs.map(g => `<li><b class="mono">${c.code}</b> No footage indexed ${hm(g.from)} → ${hm(g.to)}. This interval was not searched.</li>`).join('');
+    const gap = gs.reduce((n, g) => n + g.to - g.from, 0), first = gs[0].from === a ? gs[0].to : a, last = gs.at(-1).to === b ? gs.at(-1).from : b;
+    return `<li><b class="mono">${c.code}</b> ${dur(b - a - gap)} of footage indexed between ${hm(first)} and ${hm(last)}, in ${c.clips || gs.length - 1} clips. The ${dur(gap)} between and around them was not searched.</li>`; };
+  return `<section class="coverage"><p class="eyebrow warn">COVERAGE</p><ul>${[...by].map(([id, gs]) => line(id, gs)).join('')}</ul></section>`;
 }
 
 // ---------- multi-camera timeline with temporal zoom ----------

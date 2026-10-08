@@ -28,7 +28,7 @@ const today = () => new Date().toISOString().slice(0, 10);
 
 export const sec = t => { const [h, m, s = 0] = t.split(':').map(Number); return h * 3600 + m * 60 + s; };
 export const hms = s => [s / 3600, (s % 3600) / 60, s % 60].map(n => String(Math.floor(n)).padStart(2, '0')).join(':');
-export const dur = s => s >= 60 ? `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s` : `${s}s`;
+export const dur = s => (s = Math.round(s)) >= 3600 ? `${Math.floor(s / 3600)}h ${String(Math.floor(s % 3600 / 60)).padStart(2, '0')}m` : s >= 60 ? `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s` : `${s}s`;
 useDataset(DEMO_DATA);
 export const camera = id => cams.get(id);
 export const event = id => evs.get(id);
@@ -373,7 +373,8 @@ export async function search(text, { scope = 'all', context = null, depth, onSta
   } else if (best.length === 1 || score(best[0]) - score(best[1]) > 0.15) {
     res = { ...base, status: 'supported', primary: best[0].id, alternatives: best.slice(1).map(e => e.id), checks: [...checks(best[0], q, win), ...(visual[best[0].id] ? [visual[best[0].id]] : [])] };
   } else {
-    res = { ...base, status: 'ambiguous', candidates: best.slice(0, 3).map(e => e.id) };
+    // the top three side by side; the other matches listed under them, not dropped
+    res = { ...base, status: 'ambiguous', candidates: best.slice(0, 3).map(e => e.id), more: best.slice(3).map(e => e.id) };
   }
 
   save('vi.history', [{ text, at: new Date().toISOString(), status: res.status, n: verified.length }, ...load('vi.history', [])].slice(0, 50));

@@ -240,6 +240,13 @@ ES modules need an http origin. Opening `index.html` from disk will not work.
     - Clips indexed before this keep their gaps until re-indexed.
   - **Verified** in the browser against a fresh test server: Capture now on a paused camera from the page, typing a search throughout the capture and indexing with focus kept, then the search returning matches.
 
+- **Search results: all matches, short coverage notes, one clock**:
+  - **Only 3 results**: an ambiguous answer kept `best.slice(0, 3)` for the comparison grid and dropped the rest. Now the result also carries `more` (the other matches), listed under the grid as "N MORE MATCHES", and they are marked on the timeline. Retrieval still caps at the depth's `topK` (Fast 3, Balanced 8, Deep all).
+  - **One clock**: `dataset()` put each camera on its own local clock. A London capture at 17:00 and a California capture made at the same moment at 09:00 shared one axis, so the window spanned both, and every camera reported the other's hours as unsearched gaps. The search axis, day grouping and `TZ` now use this computer's timezone (`ZONE`). The recordings list and playback still show each camera's own zone.
+  - **Coverage notes**: `coverageGaps()` is unchanged, but `coverage()` in app.js now writes one line per camera. A camera with more than two gaps gets a summary: "6m 02s of footage indexed between 19:16 and 22:06, in 35 clips. The 13h 00m between and around them was not searched." That is 3 lines instead of 42 on the real store.
+  - `dur()` now formats hours.
+  - **Verified** on a copy of the real store with live capture paused: "Find the white car" gives 8 plausible matches (3 compared + 5 listed); the header window is 09:00 → 22:06 GMT+5:30.
+
 ## Footage sources (researched)
 
 Live feeds (for the live-ingest stretch goal; all free, check each licence before redistributing):
