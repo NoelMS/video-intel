@@ -1277,3 +1277,6 @@ if (S.view === 'search' && S.phase === 'idle') { let seen = 'seen'; try { seen =
 
 // Installable app (PWA); the worker only serves offline.html when the local server is down.
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+
+// Keep an icon-started server alive while the app is open (it exits when idle; see server.mjs VI_IDLE_EXIT).
+if (mode === 'server') setInterval(() => fetch('api/health', { cache: 'no-store' }).catch(() => {}), 60e3);

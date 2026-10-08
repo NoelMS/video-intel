@@ -92,9 +92,17 @@ const liveText = await (await fetch(base + 'live?speed=3600')).text();
 assert.match(liveText, /event: alert/); assert.match(liveText, /event: end/);
 srv.close();
 srv = await start(0, store);                                                         // restart: memory persists
+assert.equal(srv.address().address, '127.0.0.1', 'server is not exposed to the network');
 const mem = await (await fetch(`http://localhost:${srv.address().port}/api/memory`)).json();
 assert.ok(mem.some(r => r.name === 'East Gate'), 'referent survives server restart');
 srv.close();
 (await import('node:fs')).rmSync(store);
+
+// icon-launched server exits on its own once idle
+const { spawn } = await import('node:child_process');
+const child = spawn(process.execPath, ['server.mjs'], { env: { ...process.env, PORT: '8799', VI_IDLE_EXIT: '1500', VI_STORE: store } });
+const exitCode = await new Promise((res, rej) => { child.on('exit', res); setTimeout(() => { child.kill(); rej(new Error('idle server did not exit')); }, 20000); });
+assert.equal(exitCode, 0);
+(await import('node:fs')).rmSync(store, { force: true });
 
 console.log('all flows ok');

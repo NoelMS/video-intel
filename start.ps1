@@ -1,7 +1,9 @@
 # One-click launcher: ensures Node.js, starts server.mjs, opens the app. Run via Start.cmd.
-#   -Portable   use a private Node in .runtime\ instead of the system one (downloaded if missing)
-#   -NoBrowser  start the server without opening a browser
-param([switch]$Portable, [switch]$NoBrowser)
+#   -Portable    use a private Node in .runtime\ instead of the system one (downloaded if missing)
+#   -NoBrowser   start the server without opening a browser
+#   -Background  start the server hidden and return (used by the installed app icon via video-intel://);
+#                that server exits on its own a few minutes after the app window closes
+param([switch]$Portable, [switch]$NoBrowser, [switch]$Background)
 $ErrorActionPreference = 'Stop'
 $MinNode = 18
 $root = $PSScriptRoot
@@ -12,6 +14,16 @@ function Get-NodeMajor($exe) { try { [int]((& $exe --version) -replace '^v(\d+).
 function Find-Node {
   $candidates = if ($Portable) { @($runtime) } else { @((Get-Command node -ErrorAction SilentlyContinue).Source, "$env:ProgramFiles\nodejs\node.exe", $runtime) }
   foreach ($c in $candidates) { if ($c -and (Test-Path $c) -and (Get-NodeMajor $c) -ge $MinNode) { return $c } }
+}
+
+# Registers video-intel:// for this user (no admin) so the installed app can start the server.
+# The URL itself is never passed to the script, so a link cannot inject arguments.
+function Register-Protocol {
+  $cmd = "`"$PSHOME\powershell.exe`" -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$PSCommandPath`" -Background"
+  $k = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Software\Classes\video-intel')
+  $k.SetValue('', 'URL:Video Intelligence launcher'); $k.SetValue('URL Protocol', '')
+  $k.CreateSubKey('shell\open\command').SetValue('', $cmd)
+  $k.Close()
 }
 
 # Open as a standalone app window (Edge ships with Windows; Chrome works too); else the default browser.
@@ -51,6 +63,7 @@ if (-not $node) {
   if (-not $node) { throw "Could not install Node.js. Install it from https://nodejs.org, then run Start again." }
 }
 Write-Host "Using Node $(& $node --version) at $node"
+if (-not $Background) { Register-Protocol }
 
 # Already running? Just open it.
 for ($port = 8000; $port -lt 8020; $port++) {
@@ -60,11 +73,18 @@ for ($port = 8000; $port -lt 8020; $port++) {
 $url = "http://localhost:$(if ($running) { $running } else { $port })/"
 if ($running) {
   Write-Host "Already running at $url"
-  if (-not $NoBrowser) { Open-App $url }
+  if (-not $NoBrowser -and -not $Background) { Open-App $url }
   exit 0
 }
 
 $env:PORT = $port
+if ($Background) {
+  New-Item -ItemType Directory -Force (Join-Path $root '.runtime') | Out-Null
+  $env:VI_IDLE_EXIT = 180000
+  Start-Process $node -ArgumentList 'server.mjs' -WorkingDirectory $root -WindowStyle Hidden `
+    -RedirectStandardOutput (Join-Path $root '.runtime\server.log') -RedirectStandardError (Join-Path $root '.runtime\server.err.log')
+  exit 0   # the app page polls and reloads itself once the server answers
+}
 $server = Start-Process $node -ArgumentList 'server.mjs' -WorkingDirectory $root -NoNewWindow -PassThru
 for ($i = 0; $i -lt 50; $i++) {
   if ($server.HasExited) { throw "Server exited with code $($server.ExitCode)." }

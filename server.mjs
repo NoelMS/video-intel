@@ -187,7 +187,8 @@ function serveStatic(res, path) {
   createReadStream(file).pipe(res);
 }
 
-export function start(port = 0, storeFile = join(root, '.store', 'store.json')) {
+// Binds to loopback by default: the app has no sign-in, so it must not be reachable from the network.
+export function start(port = 0, storeFile = join(root, '.store', 'store.json'), host = '127.0.0.1') {
   api.useStorage(fileStore(storeFile));
   const server = createServer(async (req, res) => {
     const url = new URL(req.url, 'http://x');
@@ -212,10 +213,26 @@ export function start(port = 0, storeFile = join(root, '.store', 'store.json')) 
       if (!e.status) console.error(e);
     }
   });
-  return new Promise(r => server.listen(port, () => r(server)));
+  return new Promise(r => server.listen(port, host, () => {
+    // Also answer on IPv6 loopback: Windows tries ::1 first for "localhost" and waits ~2 s on a refusal.
+    if (host === '127.0.0.1') {
+      const v6 = createServer((req, res) => server.emit('request', req, res)).on('error', () => {});
+      v6.listen(server.address().port, '::1');
+      server.on('close', () => v6.close());
+    }
+    r(server);
+  }));
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === normalize(process.argv[1])) {
-  const s = await start(+process.env.PORT || 8000, process.env.VI_STORE);
+  const s = await start(+process.env.PORT || 8000, process.env.VI_STORE, process.env.HOST || '127.0.0.1');
   console.log(`video-intel on http://localhost:${s.address().port}`);
+  // VI_IDLE_EXIT=<ms>: set when the app icon starts the server in the background. Exit once nothing has
+  // talked to it for that long (the open app pings every minute), so closing the window stops the server.
+  const idle = +process.env.VI_IDLE_EXIT;
+  if (idle) {
+    let last = Date.now(), open = 0;
+    s.on('request', (req, res) => { open++; last = Date.now(); res.on('close', () => { open--; last = Date.now(); }); });
+    setInterval(() => { if (!open && Date.now() - last > idle) { console.log('idle, exiting'); process.exit(0); } }, Math.min(idle, 15e3));
+  }
 }
