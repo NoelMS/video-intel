@@ -324,7 +324,7 @@ ES modules need an http origin. Opening `index.html` from disk will not work.
 
 - **Phases 4, 6, 7: evaluation, re-ID, real alerts, continuous live, write-up**:
   - **Evaluation** (`eval/`):
-    - Footage: 8 MEVA cameras (2018-03-07 11:00-11:05, school + bus sites) and 5 TfL clips, indexed by a server whose store is `N:ideo-intel-test\evalstore\store.json`. Run it with `TEMP`/`TMP` on N: as well; C: is nearly full.
+    - Footage: 8 MEVA cameras (2018-03-07 11:00-11:05, school + bus sites) and 5 TfL clips, indexed by a server whose store is `N:\video-intel-test\evalstore\store.json`. Run it with `TEMP`/`TMP` on N: as well; C: is nearly full.
     - Queries: 27 activity queries from MEVA annotations plus 16 hand-labelled attribute queries, alternating dev/held-out.
     - `eval.mjs` switches the search day per query (MEVA is 2018, TfL 2026).
     - Ablation switches go through the search request (`ablation: { image, frames, labels, verify, weights }`, evaluation only).
@@ -340,7 +340,7 @@ ES modules need an http origin. Opening `index.html` from disk will not work.
     - A segment's start is its file mtime minus its duration: a live stream sends a burst of buffered video on connecting, so the strftime file name is wrong.
     - Empty segments are skipped. While the backlog is full, segments are dropped and counted (`dropped while indexing caught up`).
     - Without `-nostdin`, ffmpeg stopped after a segment or two.
-  - **Disk**: C: filled up during the evaluation (the MEVA footage plus scratch test installs) and truncated `sources.mjs` mid-write; it was restored from git and the session's changes re-applied. Test data now lives on `N:ideo-intel-test`.
+  - **Disk**: C: filled up during the evaluation (the MEVA footage plus scratch test installs) and truncated `sources.mjs` mid-write; it was restored from git and the session's changes re-applied. Test data now lives on `N:\video-intel-test`.
 
 ## Footage sources (researched)
 
