@@ -188,11 +188,29 @@ function serveStatic(res, path) {
 }
 
 // Binds to loopback by default: the app has no sign-in, so it must not be reachable from the network.
+// Browser-facing guards for a loopback server with no sign-in:
+// - Host must be loopback (stops DNS-rebinding pages from reading the API)
+// - writes must not come from another origin, and a POST must carry a non-"simple" content type, which forces a
+//   CORS preflight this server never approves (stops cross-site form/fetch POSTs)
+const LOOP = /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
+const SIMPLE = ['', 'text/plain', 'application/x-www-form-urlencoded', 'multipart/form-data'];
+function guard(req) {
+  if (!LOOP.test(req.headers.host || '')) throw new HttpError(421, 'Unexpected Host header');
+  if (req.method === 'GET' || req.method === 'HEAD') return;
+  const origin = req.headers.origin;
+  if (origin && origin !== 'null' && !LOOP.test(new URL(origin).host)) throw new HttpError(403, 'Cross-origin write refused');
+  if (origin === 'null') throw new HttpError(403, 'Cross-origin write refused');
+  if (req.method === 'POST' && SIMPLE.includes((req.headers['content-type'] || '').split(';')[0].trim().toLowerCase())) throw new HttpError(415, 'Send JSON (or video) with a content-type');
+}
+
+export const activity = { busy: () => false }; // the indexer hooks in so idle exit waits for running jobs
+
 export function start(port = 0, storeFile = join(root, '.store', 'store.json'), host = '127.0.0.1') {
   api.useStorage(fileStore(storeFile));
   const server = createServer(async (req, res) => {
     const url = new URL(req.url, 'http://x');
     try {
+      guard(req);
       if (!url.pathname.startsWith('/api/')) return serveStatic(res, url.pathname);
       const path = url.pathname.slice(5), m = path.match(/^search\/(\w+)\/events$/);
       if (m && req.method === 'GET') return sse(res, m[1]);
@@ -225,6 +243,12 @@ export function start(port = 0, storeFile = join(root, '.store', 'store.json'), 
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === normalize(process.argv[1])) {
+  // VI_LOG: started windowless by launcher.exe, so there is no console; write logs to a file instead.
+  if (process.env.VI_LOG) {
+    const log = (await import('node:fs')).createWriteStream(process.env.VI_LOG, { flags: 'a' });
+    console.log = console.error = console.warn = (...a) => log.write(`${new Date().toISOString()} ${a.join(' ')}\n`);
+    process.on('uncaughtException', e => { console.error(e.stack); process.exit(1); });
+  }
   const s = await start(+process.env.PORT || 8000, process.env.VI_STORE, process.env.HOST || '127.0.0.1');
   console.log(`video-intel on http://localhost:${s.address().port}`);
   // VI_IDLE_EXIT=<ms>: set when the app icon starts the server in the background. Exit once nothing has
@@ -233,6 +257,9 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === normalize(process.argv
   if (idle) {
     let last = Date.now(), open = 0;
     s.on('request', (req, res) => { open++; last = Date.now(); res.on('close', () => { open--; last = Date.now(); }); });
-    setInterval(() => { if (!open && Date.now() - last > idle) { console.log('idle, exiting'); process.exit(0); } }, Math.min(idle, 15e3));
+    setInterval(() => {
+      if (activity.busy()) last = Date.now();
+      if (!open && Date.now() - last > idle) { console.log('idle, exiting'); process.exit(0); }
+    }, Math.min(idle, 15e3));
   }
 }

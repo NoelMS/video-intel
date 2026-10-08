@@ -70,7 +70,13 @@ const { tmpdir } = await import('node:os');
 const store = `${tmpdir()}/vi-check-${Date.now()}.json`;
 let srv = await start(0, store);
 const base = `http://localhost:${srv.address().port}/api/`;
-const call = (p, method = 'GET', body) => fetch(base + p, { method, body: body && JSON.stringify(body) }).then(async r => [r.status, await r.json()]);
+const call = (p, method = 'GET', body, headers = { 'content-type': 'application/json' }) => fetch(base + p, { method, headers, body: body && JSON.stringify(body) }).then(async r => [r.status, await r.json()]);
+// browser-facing guards: cross-site "simple" POSTs, foreign origins and rebinding Hosts are refused
+assert.equal((await call('memory', 'POST', { name: 'X', cameraId: 'cam_02', region: [0, 0, 50, 50] }, { 'content-type': 'text/plain' }))[0], 415);
+assert.equal((await call('settings', 'PUT', { depth: 'fast' }, { 'content-type': 'application/json', origin: 'https://evil.example' }))[0], 403);
+const { get } = await import('node:http');
+const rebound = await new Promise(r => get({ host: '127.0.0.1', port: srv.address().port, path: '/api/health', headers: { host: 'evil.example' } }, res => r(res.statusCode)));
+assert.equal(rebound, 421);
 assert.equal((await call('memory', 'POST', { name: 'Bad', cameraId: 'cam_02', region: [600, 0, 100, 10] }))[0], 400, 'region outside frame rejected');
 assert.equal((await call('memory', 'POST', { name: 'East Gate', cameraId: 'cam_02', region: [250, 150, 120, 180] }))[0], 200);
 const [, { id }] = await call('search', 'POST', { text: 'Did anyone enter the east gate?' });

@@ -56,20 +56,26 @@ function density(c, clickable = false) {
 }
 
 // ---------- header ----------
+const svgIcon = d => `<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+const ICON = {
+  shield: svgIcon('<path d="M8 1.8 13 3.6v4c0 3.1-2.2 5.4-5 6.6-2.8-1.2-5-3.5-5-6.6v-4z"/><path d="m5.8 8 1.6 1.6 2.9-3.2"/>'),
+  shieldOff: svgIcon('<path d="M8 1.8 13 3.6v4c0 3.1-2.2 5.4-5 6.6-2.8-1.2-5-3.5-5-6.6v-4z"/><path d="m2.5 2.5 11 11"/>'),
+  light: svgIcon('<circle cx="8" cy="8" r="3"/><path d="M8 1v1.6M8 13.4V15M1 8h1.6M13.4 8H15M3 3l1.1 1.1M11.9 11.9 13 13M3 13l1.1-1.1M11.9 4.1 13 3"/>'),
+  dark: svgIcon('<path d="M13.5 9.6A5.8 5.8 0 0 1 6.4 2.5 5.8 5.8 0 1 0 13.5 9.6z"/>'),
+  system: svgIcon('<circle cx="8" cy="8" r="6"/><path d="M8 2v12" /><path d="M8 2a6 6 0 0 1 0 12z" fill="currentColor" stroke="none"/>'),
+};
 function header() {
   const nav = [['search', 'Search'], ['cameras', 'Cameras'], ['memory', 'Memory'], ['investigation', 'Investigation'], ['system', 'System']];
   return `<a class="skip" href="#main">Skip to content</a>
   <header class="top">
     <button class="mark" data-act="go" data-view="search">Multi-Stream <b>Video Intelligence</b></button>
     <nav aria-label="Primary">${nav.map(([v, l]) => `<button data-act="go" data-view="${v}" ${S.view === v ? 'aria-current="page"' : ''}>${l}</button>`).join('')}</nav>
-    <div class="sys mono">
+    <div class="sys">
       <span class="mode" role="group" aria-label="Source"><button aria-pressed="${S.view !== 'live'}" data-act="go" data-view="search">Recorded</button><button aria-pressed="${S.view === 'live'}" data-act="go" data-view="live" title="Simulated: replays recorded footage">Live${S.live.running ? ' ●' : ''}</button></span>
-      <span class="dim">INDEX COMPLETE</span>
-      <span class="dim" title="${mode === 'server' ? 'Persisted by server.mjs' : 'Persisted in this browser only'}">STORE ${mode.toUpperCase()}</span>
-      ${DEMO ? '<span class="demo" title="Footage, detections and timings are synthetic">DEMO DATA</span>' : ''}
-      <button class="txt" data-act="go" data-view="system" title="Privacy settings">Privacy ${pv().faces || pv().plates ? 'on' : 'off'}</button>
-      <button class="txt" data-act="theme" >Theme ${theme()}</button>
-      <button class="txt" data-act="palette" aria-label="Open command menu">Ctrl K</button>
+      <span class="status" title="Index complete · ${DEMO ? 'synthetic demo footage' : 'your footage'} · saved ${mode === 'server' ? 'by the local server' : 'in this browser only'}"><i></i>${DEMO ? 'Demo data' : 'Index complete'}</span>
+      <button class="icon-btn" data-act="go" data-view="system" aria-label="Privacy masking ${pv().faces || pv().plates ? 'on' : 'off'}" title="Privacy masking ${pv().faces || pv().plates ? 'on' : 'off'}">${ICON[pv().faces || pv().plates ? 'shield' : 'shieldOff']}</button>
+      <button class="icon-btn" data-act="theme" aria-label="Theme: ${theme()}" title="Theme: ${theme()}">${ICON[theme()]}</button>
+      <button class="keys" data-act="palette" aria-label="Open command menu (Ctrl K)" title="Command menu"><kbd>Ctrl</kbd><kbd>K</kbd></button>
     </div>
   </header>`;
 }
@@ -104,7 +110,8 @@ function searchView() {
     <div class="hero-l">
       <p class="eyebrow">${DAY} · 09:00 → 10:00 ${TZ} · ${cams.length} cameras · recorded</p>
       <h1>Search every camera like you remember the moment.</h1>
-      <p class="lede">Ask naturally. Find the moment. Follow the evidence. <button class="txt" data-act="intro">Watch the 6-second demonstration</button></p>
+      <p class="lede">Ask naturally. Find the moment. Follow the evidence.</p>
+      <button class="play-demo" data-act="intro"><span aria-hidden="true">▶</span> Watch the demonstration <span class="dim">6 s</span></button>
       ${composer(false)}
       <ol class="starts" aria-label="Starting points">${STARTS.map(([q, t], i) => `<li><button data-act="ask" data-q="${esc(q)}">
         <span class="mono dim">${String(i + 1).padStart(2, '0')}</span><span>${esc(q)}</span><span class="mono dim">${t}</span></button></li>`).join('')}</ol>
@@ -655,7 +662,6 @@ function introLayer() {
   </div>`;
 }
 function playIntro() {
-  try { localStorage.setItem('vi.intro', 'seen'); } catch {}
   openLayer({ kind: 'intro' });
   const root = $('.intro'), q = 'Find the red car entering the gate.', show = s => { $('#intro-q') && ($('#intro-q').textContent = s); };
   const at = (ms, fn) => introTimers.push(setTimeout(fn, ms));
@@ -1273,7 +1279,7 @@ function render() {
   api.getMemory(), api.getHistory(), api.getSaved(), api.getNotes(), api.getSettings(), api.getAudit(), api.getWatches(), api.getAlerts()]);
 S.registered = await api.getRegistered();
 render();
-if (S.view === 'search' && S.phase === 'idle') { let seen = 'seen'; try { seen = localStorage.getItem('vi.intro'); } catch {} if (!seen) playIntro(); }
+
 
 // Installable app (PWA); the worker only serves offline.html when the local server is down.
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
