@@ -342,6 +342,13 @@ ES modules need an http origin. Opening `index.html` from disk will not work.
     - Without `-nostdin`, ffmpeg stopped after a segment or two.
   - **Disk**: C: filled up during the evaluation (the MEVA footage plus scratch test installs) and truncated `sources.mjs` mid-write; it was restored from git and the session's changes re-applied. Test data now lives on `N:\video-intel-test`.
 
+- **Alerts and refusals on real footage** (tested with the real models on two fresh TfL clips, one H.265: indexed in 30-74 s, 0 skipped):
+  - **Alert flood**: a watch for "a bus" fired on all 58 objects of the clips. `matchWatch` interpreted watches with the demo's `ATTRS`, which has no "bus", so the watch kept only its time window. Watches now use `watchVocabOf()`: `LABEL_WORDS` (every word the indexer's naming lists and the detector's kept classes can put in a label) plus the footage's own label words. A watch has no image similarity, so it must know "bus" before the first bus is indexed. Search keeps the footage-only vocabulary (`vocabOf()`), so the published evaluation is unchanged by this. After: 1 alert, the red bus.
+  - **"Find an elephant" listed 8 random events**: a query with no entity or attribute word was treated as "what happened". `activity` now needs a generic question (`GENERIC`: what, anything, happened, going on...). Other queries stay finds; a watch with nothing to match (`find` with no entity, attribute or place) never fires instead of firing on everything.
+  - **...then offered unchecked guesses**: the image ranking always has a top few. The vision model said "no elephant" to each checked candidate, and the unchecked ones below were shown as ambiguous matches. With no entity or attribute words, only visually confirmed candidates count. After: elephant and unicorn are refused; "London taxi" shows only confirmed cars. At Fast depth (no visual check) such a query still shows its best image matches.
+  - **Evaluation impact**: only the verified variant, and only queries with no entity or attribute word (e.g. "Find a London taxi"). Rerun `eval/eval.mjs` on the evaluation footage to refresh `results-*.md`; this machine does not have it indexed.
+  - `check-live.mjs` passed again after a fix: it looked for the 2018 MEVA camera in the default (latest) day; it now selects the archive's day first.
+
 ## Footage sources (researched)
 
 Live feeds (for the live-ingest stretch goal; all free, check each licence before redistributing):

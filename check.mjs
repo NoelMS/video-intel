@@ -56,6 +56,10 @@ const again = []; await api.live({ speed: 3600, tickMs: 0, onAlert: a => again.p
 assert.equal(again.length, 0, 'no duplicate alerts on replay');
 assert.equal(api.matchWatch({ text: 'Anyone at the east dock', scope: 'all', from: '00:00', to: '23:59' }, api.event('ev_091412'), await api.getMemory()), null);
 assert.equal(api.inSchedule(api.sec('23:00:00'), { from: '20:00', to: '06:00' }), true);
+// a thing no label names is a find (refused by the checks), never "what happened"; a watch for it never fires
+assert.equal(api.interpret('Find an elephant', []).intent, 'find');
+assert.equal(api.interpret('What happened after 9:40?', []).intent, 'activity');
+assert.equal(api.matchWatch({ text: 'Notify me if an elephant appears', scope: 'all', from: '00:00', to: '23:59' }, api.event('ev_091412'), []), false);
 
 // §63 evidence board ordering
 await api.saveEvidence('ev_091548', 'q'); await api.saveJourney('A17', 'q'); await api.saveEvidence('ev_092630', 'q');
@@ -191,6 +195,7 @@ if (ffmpegPath()) {
   indexer.configure({ describe: async () => ({ objects: [{ ...person(0, 0, 100 + 20 * k++).objects[0] }], faces: [[10, 10, 20, 20]], plates: [], lighting: 'good' }) });
   // a standing query set before the footage arrives fires when the recording finishes indexing
   await fetch(b2 + 'watches', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text: 'man in a red jacket', scope: 'all', from: '00:00', to: '23:59' }) });
+  await fetch(b2 + 'watches', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text: 'Notify me if a red bus appears', scope: 'all', from: '00:00', to: '23:59' }) });
   const r = await fetch(b2 + 'videos?' + new URLSearchParams({ ...meta, filename: 'clip.mp4' }), { method: 'POST', headers: { 'content-type': 'video/mp4' }, body: (await import('node:fs')).readFileSync(clip) });
   assert.equal(r.status, 200, await r.clone().text());
   for (let i = 0; i < 100 && (await (await fetch(b2 + 'videos')).json())[0].status !== 'ready'; i++) await new Promise(res => setTimeout(res, 200));
@@ -209,6 +214,7 @@ if (ffmpegPath()) {
   let alerts = [];
   for (let i = 0; i < 50 && !alerts.length; i++) { alerts = await (await fetch(b2 + 'alerts')).json(); if (!alerts.length) await new Promise(res => setTimeout(res, 100)); }
   assert.ok(alerts.some(a => a.watchText === 'man in a red jacket' && a.eventId.startsWith(vid.id)), 'standing query alerts on newly indexed real footage');
+  assert.ok(!alerts.some(a => /bus/.test(a.watchText)), 'a watch for a red bus does not fire on a man in a red jacket');
   assert.ok(!existsSync(indexer.playFile(vid)), 'browser-playable H.264 source gets no copy');
   // H.265 (what most CCTV exports) gets an H.264 copy, served at /play; /file stays the untouched source
   const hevc = `${storeDir}/cctv.mkv`;

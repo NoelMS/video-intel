@@ -3,12 +3,12 @@
 import * as DEMO_DATA from './data.js';
 
 // The active dataset: the synthetic demo (data.js) or "My footage" built by indexer.mjs, same shape either way.
-let D = DEMO_DATA;
+let D = DEMO_DATA, realVocab = null, watchVocab = null;
 export const W = [0, 0];                       // mutated in place by useDataset, so importers keep the same array
 let cams = new Map(), evs = new Map();
 export const ds = () => D;
 export function useDataset(d) {
-  D = d;
+  D = d; realVocab = watchVocab = null;
   d.WINDOW.forEach((t, i) => { W[i] = sec(t); });
   cams = new Map(d.cameras.map(c => [c.id, c]));
   evs = new Map(d.events.map(e => [e.id, e]));
@@ -169,8 +169,21 @@ export function timeWindow(lc) {
   return { after: clock(lc, 'after') ?? clock(lc, 'since'), before: clock(lc, 'before') ?? clock(lc, 'until') };
 }
 
-// vocab: words that count as attributes. The demo uses ATTRS; real footage adds every word the vision model used.
-export function interpret(text, refs, context, vocab = ATTRS) {
+// vocab: words that count as attributes: the demo's ATTRS, or on real footage the words that occur in its labels. (The
+// demo's list leaked into real footage twice: "jacket" became a required word no real label has, and a watch for "a bus"
+// knew no "bus", so it matched every object.) Other words are left to the image similarity.
+const vocabOf = () => D.DEMO ? ATTRS : (realVocab ??= [...new Set(D.events.flatMap(e => e.attrs))]);
+// Every word a real label can hold: the indexer's naming choices (indexer.mjs) and the detector's kept classes
+// (detector.mjs). A watch has no pictures to fall back on, so it must know "bus" before the first bus is indexed.
+const LABEL_WORDS = ['black', 'white', 'grey', 'silver', 'red', 'blue', 'green', 'yellow', 'orange', 'brown', 'beige', 'purple', 'pink',
+  'hatchback', 'saloon', 'estate', 'suv', 'taxi', 'van', 'pickup', 'lorry', 'bus', 'bicycle', 'motorcycle',
+  'bag', 'backpack', 'handbag', 'suitcase', 'umbrella', 'phone', 'child',
+  'bird', 'cat', 'dog', 'horse', 'sheep', 'cow', 'elephant', 'bear', 'zebra', 'giraffe'];
+const watchVocabOf = () => D.DEMO ? ATTRS : (watchVocab ??= [...new Set([...LABEL_WORDS, ...vocabOf()])]);
+// "what happened", "anything after 9": a question about activity, not about a thing. "Find an elephant" is about a thing
+// the labels never name; it stays a find, so the image similarity ranks it and the visual check can reject it.
+const GENERIC = /\b(what|anything|activity|happen(ed|ing|s)?|going on|events?)\b/;
+export function interpret(text, refs, context, vocab = vocabOf()) {
   const lc = ' ' + text.toLowerCase().replace(/gray/g, 'grey') + ' ';
   const entity = Object.keys(ENTITY).find(k => ENTITY[k].test(lc)) || null;
   const attrs = vocab.filter(a => new RegExp(`\\b${a}\\b`).test(lc) && !Object.values(ENTITY).some(re => re.test(` ${a} `)));
@@ -185,7 +198,7 @@ export function interpret(text, refs, context, vocab = ATTRS) {
   return {
     text, entity, attrs, location, follow,
     crossing: /\b(pass(ed|es)?|through|enter(ed|s|ing)?|came in|went in)\b/.test(lc),
-    intent: journey ? 'journey' : !entity && !attrs.length && !follow ? 'activity' : 'find',
+    intent: journey ? 'journey' : !entity && !attrs.length && !follow && GENERIC.test(lc) ? 'activity' : 'find',
     ...timeWindow(lc),
     yesNo: /^\s*(did|was|were|is|are|has|have)\b/.test(lc),
   };
@@ -275,8 +288,10 @@ export async function addAlert(w, e) {
 export const inSchedule = (t, w) => { const [a, b] = [sec(w.from), sec(w.to)]; return a <= b ? t >= a && t <= b : t >= a || t <= b; };
 // null = watch cannot be evaluated (names a place nobody has defined yet).
 export function matchWatch(w, e, refs) {
-  const q = interpret(w.text, refs, null);
+  const q = interpret(w.text, refs, null, watchVocabOf());
   if (q.location && !q.location.ref) return null;
+  // a thing no label names ("an elephant") cannot be matched without the pictures; never fire on every object instead
+  if (q.intent === 'find' && !q.entity && !q.attrs.length && !q.location) return false;
   if (!inSchedule(sec(e.time), w) || (w.scope !== 'all' && w.scope !== e.cameraId)) return false;
   return checks(e, q, [q.after ?? 0, q.before ?? 86400]).every(c => c.ok);
 }
@@ -356,8 +371,7 @@ export async function search(text, { scope = 'all', context = null, depth, onSta
   // Attribute words are the ones the labels can contain: on real footage, words that occur in its labels. (The demo's
   // vocabulary leaked in before: "jacket" became a required attribute no real label has, so "the person in a red
   // jacket" matched nobody.) Other words are left to the image similarity.
-  const vocab = D.DEMO ? ATTRS : [...new Set(D.events.flatMap(e => e.attrs))];
-  const q = interpret(text, refs, context, vocab);
+  const q = interpret(text, refs, context);
   await step('interpreted', 'Query interpreted', null, { interp: q });
   if (q.location && !q.location.ref) return { status: 'clarify', interp: q, funnel };
 
@@ -398,6 +412,9 @@ export async function search(text, { scope = 'all', context = null, depth, onSta
       visual[e.id] = { ok: r.answer === 'yes', text: `Visual check (${r.model}): ${r.answer === 'yes' ? 'confirmed' : r.answer}, ${r.reason}` };
       if (r.answer === 'no') { verified = verified.filter(x => x !== e); rejected.push({ id: e.id, checks: [...checks(e, q, win), visual[e.id]] }); }
     }
+    // Nothing in the words to check ("Find an elephant"): the image ranking always has a top few, so only what the model
+    // confirmed counts. Otherwise, after it rejects its top picks, the unchecked ones below were offered as matches.
+    if (!q.entity && !q.attrs.length && !q.follow) verified = verified.filter(e => visual[e.id]?.ok);
   }
   await step('verification', Object.keys(visual).length ? `Visually checked ${Object.keys(visual).length} by the local model` : 'Verified against evidence', verified.length);
 

@@ -60,6 +60,8 @@ await until(async () => (await call('ingest'))[1].imports.every(i => ['done', 'f
 const imp = (await call('ingest'))[1].imports;
 assert.ok(imp.every(i => i.state === 'done'), JSON.stringify(imp.map(i => [i.state, i.error])));
 await until(async () => (await ready(`MEVA ${small[0].camera}`)()).length === Math.min(2, g.length));
+// search shows one day at a time (latest first), and the archive is from 2018
+await call('settings', 'PUT', { day: (await call('dataset'))[1].days.find(d => d.startsWith('2018')) });
 const mcam = (await call('dataset'))[1].cameras.find(c => c.name === `MEVA ${small[0].camera}`);
 assert.equal(mcam.clips, Math.min(2, g.length)); assert.equal(mcam.tz, sources.MEVA_TZ);
 console.log('MEVA camera coverage', mcam.coverage);
