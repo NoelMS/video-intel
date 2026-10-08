@@ -12,8 +12,8 @@ const root = dirname(fileURLToPath(import.meta.url));
 const RT = join(root, '.runtime');
 export const OLLAMA = process.env.OLLAMA_HOST || 'http://127.0.0.1:11434';
 export const MODELS = {
-  'qwen3-vl:2b': { size: '1.9 GB', note: 'Fits a 4 GB GPU. Fastest.' },
-  'qwen3-vl:4b': { size: '3.3 GB', note: 'More accurate. Needs about 6 GB of GPU memory, otherwise partly runs on the CPU.' },
+  'qwen3-vl:2b-instruct': { size: '1.9 GB', note: 'Fits a 4 GB GPU. Fastest.' },
+  'qwen3-vl:4b-instruct': { size: '3.3 GB', note: 'More accurate. Needs about 6 GB of GPU memory, otherwise partly runs on the CPU.' },
 };
 const FFMPEG_ZIP = 'https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip';
 const OLLAMA_SETUP = 'https://github.com/ollama/ollama/releases/latest/download/OllamaSetup.exe';
