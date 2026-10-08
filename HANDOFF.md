@@ -6,18 +6,21 @@ Read this first. It is updated with every major commit, so the newest entry in t
 
 A frontend for natural-language search over recorded multi-camera footage. It covers search → interpretation → retrieval trail → grounded evidence → cross-camera journey → saved places → investigation notebook. The design spec it implements is the long "Multi-Stream Video Intelligence" prompt (175 sections). Its section numbers are cited below as §N.
 
-**All data is synthetic demo data.** The UI says so ("DEMO DATA", "SYNTHETIC DEMO FRAME"). Never present mock values as real system output (§127).
+Two data sources, switched in the header (`settings.source`):
+- **Demo**: synthetic cameras and events (`data.js`), labelled as such ("SYNTHETIC DEMO FRAME"). Never present them as real output (§127).
+- **My footage**: your own recordings, indexed on this computer by a local Ollama vision model (`indexer.mjs`). This needs the server; static hosting only has the demo.
 
 ## Run
 
 ```
-Start.cmd                       # one click: ensures Node 18+, starts the server on a free port (8000+), opens the browser
+Start.cmd                       # one click: Node 18+, builds launcher.exe, starts the server hidden on :8000, opens the app window, exits
 npm start                       # node server.mjs: static + REST + SSE, persists to .store/store.json (PORT, VI_STORE env)
 python -m http.server 8000      # static-only alternative: the in-browser mock backend is used, state in localStorage
-npm run check                   # asserts the §174 flows plus server validation/SSE/restart persistence
+npm run check                   # §174 flows, server validation/guards/SSE/persistence, tracker unit test, and (when
+                                # ffmpeg is installed) a full upload -> extract -> index -> search run with a stub model
 ```
 
-The header shows `STORE SERVER` or `STORE BROWSER` so you can tell which backend is live. `service.js` decides at boot from `<meta name="vi-backend" content="server">`, which `server.mjs` injects into `index.html` (no probe, so static hosting logs no 404). `GET /api/health` still exists for ops.
+The header's Demo / My footage switch is disabled in static mode. `service.js` decides at boot from `<meta name="vi-backend" content="server">`, which `server.mjs` injects into `index.html` (no probe, so static hosting logs no 404). `GET /api/health` still exists for ops.
 
 ES modules need an http origin. Opening `index.html` from disk will not work.
 
@@ -28,8 +31,10 @@ ES modules need an http origin. Opening `index.html` from disk will not work.
 | `index.html` | Shell: `#app`, one `<dialog id="layer">`, `#peek` tooltip, `#toasts` |
 | `styles.css` | Design tokens on `:root`, all styles, reduced-motion and responsive rules |
 | `data.js` | Demo dataset: cameras, events, seed referents, track names |
-| `api.js` | Mock backend; exports mirror §90 endpoints. Pure logic plus pluggable storage |
-| `frame.js` | Synthetic SVG camera stills (stand-in for decoded video frames) |
+| `api.js` | Search pipeline and endpoint shapes (§90). Works over the active dataset (`useDataset`/`ds()`, `W` mutated in place). Pure logic plus pluggable storage (`kv` shared with the indexer). `search({ verify })` runs the visual check when the server passes one |
+| `frame.js` | Camera stills as SVG: synthetic scenes for the demo, or the extracted frame for your footage (`realFrame`: nearest frame, the track's box on that exact frame, opaque redaction for faces and plates the model reported). Boxes live in 640x360 space; non-16:9 cameras are scaled vertically by `ky` so they keep their true shape |
+| `setup.mjs` | Local-analysis dependencies: status (ffmpeg, Ollama, model) and a one-at-a-time install job. ffmpeg comes from the gyan.dev essentials zip (SHA-256 verified, unpacked with `System32\tar.exe`; a bare `tar` can be Git's GNU tar, which fails on zip). Ollama comes from the GitHub release `OllamaSetup.exe` (verified against `sha256sum.txt`, `/VERYSILENT` per-user install). The model is fetched with `/api/pull` (streamed progress) |
+| `indexer.mjs` | Your recordings: streams an upload to `.store/videos`, ffprobe metadata, a resumable queue. ffmpeg samples at `pipeline.sampling` fps with `mpdecimate` (drops static frames) and `showinfo` timestamps. `describeFrame` calls Ollama with a JSON schema. `track()` links detections (overlap or ~1.5 body-lengths, plus agreeing labels). `dataset()` builds the "mine" dataset in `data.js` shape. `linkAcrossCameras` gives "possible" re-identification by shared description words. `verify()` re-checks a candidate frame with the question |
 | `service.js` | Backend selection: `{ api, mode }`. Pure helpers always from `api.js`, endpoints from `remote.js` when the server answers |
 | `remote.js` | fetch/EventSource client for `server.mjs`, same signatures as `api.js` endpoints |
 | `server.mjs` | Node (no deps): static files, `/api/*` REST, `POST /api/search` + `GET /api/search/:id/events` SSE, `DELETE /api/search/:id` cancels. Validates every write (trust boundary) |
@@ -38,8 +43,8 @@ ES modules need an http origin. Opening `index.html` from disk will not work.
 | `manifest.webmanifest`, `icon.svg`, `icon-192.png`, `icon-512.png` | PWA install metadata. PNGs are rendered from `icon.svg` with headless Chrome (`--screenshot --default-background-color=00000000`) |
 | `sw.js`, `offline.html` | The service worker's only job: when a navigation fails (server down, e.g. app opened from its installed icon) it serves `offline.html`, which fires `video-intel://start` (automatically, plus a button for when the browser wants a click), polls `/api/health`, and reloads into the app. It never caches the app or the API. Bump the cache name (now `vi-offline-v3`) when `offline.html` changes |
 | `package.json` | `type: module`, `start`/`check` scripts. No dependencies |
-| `app.js` | UI: one state object `S`, string-template views, delegated `data-act` actions |
-| `check.mjs` | Flow assertions against `api.js` (node) |
+| `app.js` | UI: one state object `S`, string-template views, delegated `data-act` actions. `loadDataset`/`switchSource`; first-launch setup prompt (`setupLayer`); upload with progress (`uploadFootage`, XHR); indexing status polling (`videosList`/`pollVideos`) |
+| `check.mjs` | Flow assertions (node) |
 
 ## Architecture rules
 
@@ -80,19 +85,36 @@ ES modules need an http origin. Opening `index.html` from disk will not work.
 
 - **No console + header + guards**: `Start.cmd` now sets up (Node, `node-path.txt`, builds `launcher.exe` when `launcher.cs` is newer, registers `video-intel://` → `launcher.exe`), runs the launcher, opens the app window and exits within ~3 s. Nothing stays open: 0 visible windows were verified for the server and its hidden console host. Wait on the launcher with `$p.WaitForExit()`, not `Start-Process -Wait`, which in PS 5.1 also waits for the spawned server. The port is fixed at 8000 (the PWA origin). With `VI_LOG` set, the server writes logs to a file (there is no console). Idle exit is deferred while `activity.busy()` (for the indexer). **Guards** (`guard()` in server.mjs): Host must be loopback (anti DNS-rebinding); non-GET with a foreign or `null` Origin gets 403; a POST with a CORS-safelisted or missing content-type gets 415 (forces a preflight that is never approved). Header status cluster: sentence-case sans, status dot, SVG icon buttons for privacy and theme, `<kbd>` keycaps; scrollbars use the standard `scrollbar-color`/`scrollbar-width` tokens.
 
+- **Local video analysis (Ollama)**: replaces the "registered, never searchable" import.
+  - **First launch** (server mode, `settings.vision.setupSeen` false) opens the setup prompt: install ffmpeg, Ollama and the vision model (choice of `qwen3-vl:2b` (default, fits 4 GB GPUs), `qwen3-vl:4b`, or any Ollama model name, e.g. one you have trained or imported). "Not now" sets `setupSeen`. It is also reachable from System → Local analysis.
+  - **Upload**: `POST /api/videos?name&location&tz&start&neighbors&filename` with a raw `video/*` or `application/octet-stream` body (validated: extension allow-list, IANA tz, ISO start). Videos are served with Range support at `/api/videos/:id/file`, frames at `/frames/:n`.
+  - **Model gotchas, all measured on qwen3-vl:2b / RTX 3050 4 GB / Ollama 0.31.2**:
+    - `num_ctx: 4096` is required (the 256K default runs out of memory).
+    - `think: false`, otherwise it reasons for ~40 s a frame.
+    - With a schema, the JSON arrives in `message.thinking` and `content` is empty; read either.
+    - The model repeats objects until the cap, so `maxItems` caps the grammar and `dedupe` drops overlapping duplicates.
+    - The lean schema (type, label, box, action, faces, plates, lighting) takes ~5.4 s a frame; colour and attribute lists took ~45 s.
+    - The OpenCV `vtest.avi` (80 s, DivX 4:3) indexed in ~280 s at 0.5 fps into 88 events. "Show the white delivery van" is SUPPORTED with a visual check. "Woman in a red jacket" gives 3 plausible matches (fragments of the same person), with one candidate rejected by the visual check.
+  - **Search over your footage**: no simulated delays; `interpret` vocabulary = demo words plus every word in the index; the visual check covers the top 3 (balanced) or 6 (deep) candidates, where "no" rejects the candidate with the model's reason and the checks show on the seal and comparison cards.
+  - **Re-index** deletes frames and detections so a new sampling rate or model takes effect.
+  - Saved items, audit rows, alerts and referents are filtered to the active dataset (`here()`, `memHere()`).
+  - The demo opening plays only from its button.
+
 ## Verifying changes
 
 `npm run check` covers the logic and the server. For UI work, drive headless Chrome over CDP (no Playwright installed). The pattern used so far: launch `chrome --headless=new --remote-debugging-port`, set `localStorage vi.intro=seen`, run JS steps, capture screenshots, and collect `Runtime.exceptionThrown`, console errors and `Log.entryAdded`.
 
 ## Known limits (deliberate; do not paper over)
 
-- All footage, detections and model scores are synthetic (`data.js`). `frame.js` draws SVG stand-ins; an event with `still`/`clip` URLs renders real media instead.
-- No indexer: registered cameras get real frame extraction but are never searchable.
-- Live mode is a replay of the recorded hour, not ingest.
+- The demo dataset is synthetic. On your footage, detections come from a small local model: labels are descriptive but not exhaustive, faces and plates are only masked when the model reports them (often not, for distant CCTV figures), and confidence is track persistence, not a calibrated score.
+- Tracking samples one frame every 2 s by default, so a person can split into several tracks. Cross-camera links are by description only and always "possible".
+- Browsers cannot play many CCTV codecs (DivX, H.265). The evidence view uses extracted frames, and "Play original" explains when it cannot play.
+- Event times are seconds from the first recording's local midnight. Footage spanning several days shows hours past 24.
+- Live mode is a replay of indexed footage, not ingest.
 - No authentication: the operator role is a setting. A real deployment must bind roles to identities server-side (`addAudit` already enforces the role from settings).
 - Stage latencies include simulated delays (`DELAY` in `api.js`).
 - Query understanding is a keyword/regex interpreter (`interpret`). A real deployment swaps in an LLM or parser behind the same output shape.
 
 ## Next up
 
-Feature-complete against the spec's deferred list. The next real step is a backend indexer: an embedding, detection and tracking pipeline that writes events in the `data.js` shape, then replacing `data.js` with `GET /cameras` and `/events` from that index.
+Higher-recall tracking (a dedicated detector or tracker, or a higher sampling rate on a bigger GPU), embedding-based retrieval for open-vocabulary queries beyond exact description words, and live RTSP ingest feeding the same indexer.

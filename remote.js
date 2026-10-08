@@ -59,6 +59,19 @@ export function live({ speed = 60, from, onTick = () => {}, onEvent = () => {}, 
     es.onerror = () => { if (es.readyState === EventSource.CLOSED) return; es.close(); reject(new Error('Live stream disconnected')); };
   });
 }
-export const getRegistered = () => j('registrations');
-export const registerCamera = c => j('registrations', { method: 'POST', body: c });
-export const deleteRegistered = id => j('registrations/' + id, { method: 'DELETE' });
+export const getSetup = () => j('setup');
+export const installSetup = parts => j('setup/install', { method: 'POST', body: parts });
+export const getDataset = () => j('dataset');
+export const getVideos = () => j('videos');
+export const deleteVideo = id => j('videos/' + id, { method: 'DELETE' });
+export const reindexVideo = id => j('videos/' + id + '/reindex', { method: 'POST', body: {} });
+// Upload with progress (fetch cannot report upload progress); metadata goes in the query string.
+export const uploadVideo = (file, meta, onProgress) => new Promise((resolve, reject) => {
+  const x = new XMLHttpRequest();
+  x.open('POST', 'api/videos?' + new URLSearchParams({ ...meta, filename: file.name }));
+  x.setRequestHeader('content-type', file.type.startsWith('video/') ? file.type : 'application/octet-stream');
+  x.upload.onprogress = e => onProgress?.(e.loaded, e.total);
+  x.onload = () => { const r = JSON.parse(x.responseText || '{}'); x.status < 300 ? resolve(r) : reject(new Error(r.error || `Upload failed (${x.status})`)); };
+  x.onerror = () => reject(new Error('Upload failed: the local server did not answer'));
+  x.send(file);
+});

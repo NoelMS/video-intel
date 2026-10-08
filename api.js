@@ -1,6 +1,18 @@
 // Mock backend. Every export mirrors an endpoint in the spec (POST /search, GET /memory, ...).
 // Swap the bodies for fetch()/SSE calls; the UI only depends on the returned shapes.
-import * as D from './data.js';
+import * as DEMO_DATA from './data.js';
+
+// The active dataset: the synthetic demo (data.js) or "My footage" built by indexer.mjs, same shape either way.
+let D = DEMO_DATA;
+export const W = [0, 0];                       // mutated in place by useDataset, so importers keep the same array
+let cams = new Map(), evs = new Map();
+export const ds = () => D;
+export function useDataset(d) {
+  D = d;
+  d.WINDOW.forEach((t, i) => { W[i] = sec(t); });
+  cams = new Map(d.cameras.map(c => [c.id, c]));
+  evs = new Map(d.events.map(e => [e.id, e]));
+}
 
 const mem = new Map();
 let store = (() => {
@@ -11,27 +23,26 @@ let store = (() => {
 export const useStorage = s => { store = s; };
 const load = (k, d) => { try { return JSON.parse(store.getItem(k)) ?? d; } catch { return d; } };
 const save = (k, v) => { try { store.setItem(k, JSON.stringify(v)); } catch {} };
+export const kv = { load, save };            // the server shares this storage with indexer.mjs
 const today = () => new Date().toISOString().slice(0, 10);
 
 export const sec = t => { const [h, m, s = 0] = t.split(':').map(Number); return h * 3600 + m * 60 + s; };
 export const hms = s => [s / 3600, (s % 3600) / 60, s % 60].map(n => String(Math.floor(n)).padStart(2, '0')).join(':');
 export const dur = s => s >= 60 ? `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s` : `${s}s`;
-export const W = D.WINDOW.map(sec);
-
-const cams = new Map(D.cameras.map(c => [c.id, c]));
-const evs = new Map(D.events.map(e => [e.id, e]));
+useDataset(DEMO_DATA);
 export const camera = id => cams.get(id);
 export const event = id => evs.get(id);
 export const object = track => ({ id: track, name: D.tracks[track], ...journey(track) });
 
 // GET /cameras, GET /cameras/:id/events
 export const getCameras = async () => D.cameras;
+export const getDataset = async () => D;
 export const getEvents = async (cameraId) => D.events.filter(e => !cameraId || e.cameraId === cameraId);
 
 // GET/POST/PUT/DELETE /memory
 export async function getMemory() {
   let m = load('vi.memory', null);
-  if (!m) save('vi.memory', m = D.seedReferents);
+  if (!m) save('vi.memory', m = DEMO_DATA.seedReferents);
   return m;
 }
 export async function createMemory(r) {
@@ -89,9 +100,11 @@ export const DEPTHS = {
 };
 export const DEFAULT_SETTINGS = {
   depth: 'balanced',
-  pipeline: { embedding: 'clip-vit-l14', detector: 'open-vocab-detector', tracker: 'bytetrack', reid: 'osnet-reid', sampling: 2, refinement: 4 },
+  source: 'demo',                                         // 'demo' (synthetic) or 'mine' (indexed recordings)
+  pipeline: { sampling: 0.5, refinement: 4 },             // frames per second sampled from recordings
   privacy: { faces: true, plates: true, onPrem: true, retentionDays: 30, expiryDays: 90, exports: 'watermarked' },
   operator: { role: 'analyst' },
+  vision: { model: 'qwen3-vl:2b', setupSeen: false },   // local analysis via Ollama (setup.mjs)
 };
 export const ROLES = ['viewer', 'analyst', 'supervisor'];
 export const EXPORTS = { allowed: 'Allowed', watermarked: 'Watermarked', disabled: 'Disabled' };
@@ -145,10 +158,11 @@ const clock = (lc, word) => {
   return h * 3600 + +(m[2] || 0) * 60;
 };
 
-export function interpret(text, refs, context) {
+// vocab: words that count as attributes. The demo uses ATTRS; real footage adds every word the vision model used.
+export function interpret(text, refs, context, vocab = ATTRS) {
   const lc = ' ' + text.toLowerCase().replace(/gray/g, 'grey') + ' ';
   const entity = Object.keys(ENTITY).find(k => ENTITY[k].test(lc)) || null;
-  const attrs = ATTRS.filter(a => new RegExp(`\\b${a}\\b`).test(lc));
+  const attrs = vocab.filter(a => new RegExp(`\\b${a}\\b`).test(lc) && !Object.values(ENTITY).some(re => re.test(` ${a} `)));
   const ref = refs.find(r => [r.name, ...(r.aliases || [])].some(n => lc.includes(n.toLowerCase())));
   let location = ref ? { term: ref.name, ref } : null;
   if (!location) {
@@ -194,11 +208,14 @@ export function journey(track) {
     const a = s[i], gap = sec(b.time) - sec(a.time);
     const adjacent = camera(a.cameraId).neighbors.includes(b.cameraId);
     const vis = Math.min(a.conf.visual, b.conf.visual);
+    // Real footage is linked by described appearance only (indexer.mjs), which never justifies more than "possible".
+    const byText = b.match;
     return {
       from: a.id, to: b.id, gap,
-      strength: adjacent && vis >= 0.75 ? 'strong' : adjacent || vis >= 0.75 ? 'likely' : 'possible',
+      strength: byText ? 'possible' : adjacent && vis >= 0.75 ? 'strong' : adjacent || vis >= 0.75 ? 'likely' : 'possible',
       reasons: [
-        { ok: vis >= 0.75, text: vis >= 0.75 ? 'Similar appearance' : 'Partially similar appearance' },
+        byText ? { ok: true, text: `Described alike: ${byText.shared.join(', ')}` }
+          : { ok: vis >= 0.75, text: vis >= 0.75 ? 'Similar appearance' : 'Partially similar appearance' },
         { ok: adjacent, text: adjacent ? 'Adjacent in known camera topology' : 'Cameras not directly connected' },
         { ok: gap < 600, text: `${gap < 600 ? 'Compatible' : 'Long'} time gap · ${dur(gap)}` },
       ],
@@ -220,16 +237,6 @@ export function assess(e, q, { cross = true } = {}) {
     ['Cross-camera link', !cross ? 'NOT CHECKED' : !tr.length ? 'NONE' : tr.some(t => t.strength === 'strong') ? 'HIGH' : 'MEDIUM'],
   ];
 }
-
-// ---------- camera registration (§117-118). Registered cameras are not searchable until an indexer runs. ----------
-export const getRegistered = async () => load('vi.registered', []);
-export async function registerCamera(c) {
-  const row = { id: 'reg_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), registered: new Date().toISOString(), ...c,
-    status: c.source.kind === 'file' ? 'frames-extracted' : 'awaiting-ingest' };
-  save('vi.registered', [...load('vi.registered', []), row]);
-  return row;
-}
-export const deleteRegistered = async id => save('vi.registered', load('vi.registered', []).filter(r => r.id !== id));
 
 // ---------- standing queries (§33), alerts (§34), live replay (§32) ----------
 const SEED_WATCHES = [
@@ -293,9 +300,11 @@ const wait = (ms, signal) => new Promise((res, rej) => {
   signal?.addEventListener('abort', abort, { once: true });
 });
 
-export async function search(text, { scope = 'all', context = null, depth, onStage = () => {}, signal, speed = 1 } = {}) {
+// verify(event, question) -> { answer: 'yes' | 'no' | 'unsure', reason, model }: the server passes the local vision
+// model for real footage. The demo has nothing to look at, so it never verifies visually.
+export async function search(text, { scope = 'all', context = null, depth, onStage = () => {}, signal, speed = 1, verify = null } = {}) {
   const t0 = Date.now();
-  const refs = await getMemory(), settings = await getSettings();
+  const refs = (await getMemory()).filter(r => camera(r.cameraId)), settings = await getSettings();
   const dk = DEPTHS[depth] ? depth : settings.depth, dp = DEPTHS[dk];
   const funnel = [];
   const step = async (stage, label, count, extra, delay = DELAY[stage]) => {
@@ -304,7 +313,8 @@ export async function search(text, { scope = 'all', context = null, depth, onSta
     funnel.push(s); onStage(s);
   };
 
-  const q = interpret(text, refs, context);
+  const vocab = D.DEMO ? ATTRS : [...new Set([...ATTRS, ...D.events.flatMap(e => e.attrs)])];
+  const q = interpret(text, refs, context, vocab);
   await step('interpreted', 'Query interpreted', null, { interp: q });
   if (q.location && !q.location.ref) return { status: 'clarify', interp: q, funnel };
 
@@ -329,18 +339,28 @@ export async function search(text, { scope = 'all', context = null, depth, onSta
   else await step('cross_camera', 'Skipped in fast mode', null, null, 0);
 
   const needCross = q.location && q.crossing && q.intent === 'find';
-  const verified = grounded.filter(e => !needCross || pathHits(e, q.location.ref.region));
+  let verified = grounded.filter(e => !needCross || pathHits(e, q.location.ref.region));
   const keep = new Set(verified.map(e => e.track));
   const rejected = semantic.filter(e => !keep.has(e.track) && !verified.includes(e))
     .filter((e, i, a) => a.findIndex(x => x.track === e.track) === i).slice(0, dk === 'deep' ? 6 : 3)
     .map(e => ({ id: e.id, checks: checks(e, q, win) }));
-  await step('verification', 'Verified against evidence', verified.length);
+  // Visual verification: the model looks at each top candidate's frame again with the question. "no" rejects it.
+  const visual = {};
+  if (verify && q.intent === 'find' && dk !== 'fast') {
+    for (const e of [...verified].sort((a, b) => score(b) - score(a)).slice(0, dk === 'deep' ? 6 : 3)) {
+      if (signal?.aborted) throw new DOMException('Search cancelled', 'AbortError');
+      const r = await verify(e, text);
+      visual[e.id] = { ok: r.answer === 'yes', text: `Visual check (${r.model}): ${r.answer === 'yes' ? 'confirmed' : r.answer}, ${r.reason}` };
+      if (r.answer === 'no') { verified = verified.filter(x => x !== e); rejected.push({ id: e.id, checks: [...checks(e, q, win), visual[e.id]] }); }
+    }
+  }
+  await step('verification', Object.keys(visual).length ? `Visually checked ${Object.keys(visual).length} by the local model` : 'Verified against evidence', verified.length);
 
   const byTrack = new Map();
   for (const e of [...verified].sort((a, b) => score(b) - score(a))) if (!byTrack.has(e.track)) byTrack.set(e.track, e);
   const best = [...byTrack.values()];
   const diag = { depth: dk, cross: dp.cross, topK: dp.topK, pipeline: { ...settings.pipeline, onPrem: settings.privacy.onPrem }, retrieved: semantic.map(e => ({ id: e.id, score: +score(e).toFixed(3) })) };
-  const base = { interp: q, window: win, scoped: scoped.map(c => c.id), coverage, rejected, funnel, diag, ms: Date.now() - t0 };
+  const base = { interp: q, window: win, scoped: scoped.map(c => c.id), coverage, rejected, funnel, diag, visual, ms: Date.now() - t0 };
 
   let res;
   if (q.intent === 'journey' && (q.follow || best.length)) {
@@ -351,7 +371,7 @@ export async function search(text, { scope = 'all', context = null, depth, onSta
   } else if (!best.length) {
     res = { ...base, status: rejected.length ? 'refusal' : 'empty' };
   } else if (best.length === 1 || score(best[0]) - score(best[1]) > 0.15) {
-    res = { ...base, status: 'supported', primary: best[0].id, alternatives: best.slice(1).map(e => e.id), checks: checks(best[0], q, win) };
+    res = { ...base, status: 'supported', primary: best[0].id, alternatives: best.slice(1).map(e => e.id), checks: [...checks(best[0], q, win), ...(visual[best[0].id] ? [visual[best[0].id]] : [])] };
   } else {
     res = { ...base, status: 'ambiguous', candidates: best.slice(0, 3).map(e => e.id) };
   }

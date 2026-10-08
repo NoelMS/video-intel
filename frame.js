@@ -1,7 +1,6 @@
-// Synthetic camera stills (SVG). Stand-in for decoded video frames: when an event carries
-// a real `still`/`clip` URL, the app renders that instead (see app.js `media()`).
-import { camera, pointAt, sec, hms } from './api.js';
-import { DAY, TZ } from './data.js';
+// Camera stills as SVG: synthetic scenes for the demo, or the real extracted frame for your footage. Either way the
+// same overlays (box, trajectory, region, privacy masks, burn-in) sit on top in the app's 640x360 frame space.
+import { camera, pointAt, sec, hms, ds } from './api.js';
 
 const INK = '#5d5b55', DIM = '#363531', BG = '#181918', GROUND = '#1f201f', TXT = '#cfc9bc', ACC = '#e0a84f';
 const L = (x1, y1, x2, y2, c = DIM, w = 1) => `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${c}" stroke-width="${w}"/>`;
@@ -56,36 +55,60 @@ function person(l, cx, cy, s, privacy) {
 }
 
 // opts: ev, offset (s from event), box, trail, region {rect,name}, privacy {faces, plates}, crop, time
+// Real frames: the extracted frame nearest in time to the event (+ offset), the track's box on that exact frame,
+// and opaque redaction over the faces/plates the model reported (it can miss some; the System page says so).
+function realFrame(c, ev, offset, privacy) {
+  const at = ev ? ev.t + offset : c.frames[Math.floor(c.frames.length / 2)]?.t ?? 0;
+  const f = c.frames.reduce((a, b) => !a || Math.abs(b.t - at) < Math.abs(a.t - at) ? b : a, null);
+  if (!f) return { scene: '', obj: null, stamp: '', masked: '' };
+  const d = ev?.dets.find(x => Math.abs(x.t - f.t) < 0.05);
+  const masks = [...(privacy.faces ? f.faces : []), ...(privacy.plates ? f.plates : [])];
+  return {
+    scene: `<image href="api/videos/${c.id}/frames/${f.n}" width="640" height="360" preserveAspectRatio="none"/>`
+      + masks.map(([x, y, w, h]) => `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="2" fill="#151514"/>`).join(''),
+    obj: d ? { box: d.box, svg: '' } : null, stamp: hms(c.t0 + f.t), masked: masks.length ? `${masks.length} REGION${masks.length > 1 ? 'S' : ''} MASKED` : '',
+  };
+}
+
 export function frame(cameraId, { ev = null, offset = 0, box = true, trail = false, region = null, privacy = { faces: true, plates: true }, crop = false, time = null } = {}) {
   const c = camera(cameraId);
-  const t = (offset + 8) / 16;
-  let obj = null;
-  if (ev && t >= 0 && t <= 1) {
-    const [cx, cy] = pointAt(ev, t), s = 0.75 + (cy - 200) / 240;
-    obj = ev.look.kind === 'vehicle' ? vehicle(ev.look, cx, cy, s, privacy.plates) : person(ev.look, cx, cy, s, privacy.faces);
+  let obj = null, masked = '', stamp, scene;
+  if (c.real) ({ scene, obj, stamp, masked } = realFrame(c, ev, offset, privacy));
+  else {
+    const t = (offset + 8) / 16;
+    if (ev && t >= 0 && t <= 1) {
+      const [cx, cy] = pointAt(ev, t), s = 0.75 + (cy - 200) / 240;
+      obj = ev.look.kind === 'vehicle' ? vehicle(ev.look, cx, cy, s, privacy.plates) : person(ev.look, cx, cy, s, privacy.faces);
+    }
+    masked = obj && (ev.look.kind === 'vehicle' ? privacy.plates && 'PLATE MASKED' : privacy.faces && 'FACE MASKED');
+    stamp = ev ? hms(sec(ev.time) + Math.round(offset)) : time ?? '';
+    scene = `<rect y="200" width="640" height="160" fill="${GROUND}"/>${L(0, 200, 640, 200)}${scenes[c.scene]()}`;
   }
-  const masked = obj && (ev.look.kind === 'vehicle' ? privacy.plates && 'PLATE MASKED' : privacy.faces && 'FACE MASKED');
-  const stamp = ev ? hms(sec(ev.time) + Math.round(offset)) : time ?? '';
-  let vb = '0 0 640 360';
+  // Boxes and regions live in a 640x360 space for every camera. A camera that is not 16:9 (e.g. 4:3 CCTV) is shown at
+  // its true shape by scaling that space vertically by ky; labels sit outside the scaled group so text never stretches.
+  const ky = c.real && c.width ? 640 * c.height / c.width / 360 : 1, H = 360 * ky;
+  let vb = `0 0 640 ${H}`;
   if (crop && obj) {
-    const [x, y, w, h] = obj.box, cw = Math.max(w, h * 1.6) * 1.5, ch = cw / 1.6;
-    vb = `${x + w / 2 - cw / 2} ${y + h / 2 - ch / 2} ${cw} ${ch}`;
+    const [x, y, w, h] = obj.box, cw = Math.max(w, h * ky * 1.6) * 1.5, ch = cw / 1.6;
+    vb = `${x + w / 2 - cw / 2} ${(y + h / 2) * ky - ch / 2} ${cw} ${ch}`;
   }
-  const label = `${c.code} ${c.name}${stamp ? ' at ' + stamp : ''}${ev && obj ? ', ' + ev.label : ''}.${masked ? ' ' + masked.toLowerCase() + '.' : ''} Synthetic demo frame.`;
-  return `<svg class="frame" viewBox="${vb}" preserveAspectRatio="xMidYMid slice" role="img" aria-label="${label}">
+  const label = `${c.code} ${c.name}${stamp ? ' at ' + stamp : ''}${ev && obj ? ', ' + ev.label : ''}.${masked ? ' ' + masked.toLowerCase() + '.' : ''}${c.real ? '' : ' Synthetic demo frame.'}`;
+  const mono = (x, y, size, extra = '') => `x="${x}" y="${y}" font-size="${size}" font-family="IBM Plex Mono, monospace" ${extra}`;
+  return `<svg class="frame" viewBox="${vb}" preserveAspectRatio="xMidYMid slice" ${crop ? '' : `style="aspect-ratio: 640 / ${H}"`} role="img" aria-label="${label}">
     <defs><filter id="pv"><feGaussianBlur stdDeviation="3.2"/></filter></defs>
-    <rect x="-400" y="-400" width="1440" height="1160" fill="${BG}"/><rect y="200" width="640" height="160" fill="${GROUND}"/>${L(0, 200, 640, 200)}
-    ${scenes[c.scene]()}
-    ${region ? `<rect x="${region.rect[0]}" y="${region.rect[1]}" width="${region.rect[2]}" height="${region.rect[3]}" fill="${ACC}" fill-opacity=".07" stroke="${ACC}" stroke-dasharray="4 3"/>
-      <text x="${region.rect[0] + 4}" y="${region.rect[1] - 5}" fill="${ACC}" font-size="10" font-family="IBM Plex Mono, monospace" letter-spacing=".08em">${region.name.toUpperCase()}</text>` : ''}
-    ${trail && ev ? `<polyline points="${[0, 0.25, 0.5, 0.75, 1].map(k => pointAt(ev, k).join(',')).join(' ')}" fill="none" stroke="${ACC}" stroke-opacity=".55" stroke-dasharray="2 4"/>` : ''}
+    <rect x="-400" y="-400" width="1440" height="1600" fill="${BG}"/>
+    <g transform="scale(1 ${ky})">${scene}
+    ${region ? `<rect x="${region.rect[0]}" y="${region.rect[1]}" width="${region.rect[2]}" height="${region.rect[3]}" fill="${ACC}" fill-opacity=".07" stroke="${ACC}" stroke-dasharray="4 3" vector-effect="non-scaling-stroke"/>` : ''}
+    ${trail && ev ? `<polyline points="${[0, 0.25, 0.5, 0.75, 1].map(k => pointAt(ev, k).join(',')).join(' ')}" fill="none" stroke="${ACC}" stroke-opacity=".55" stroke-dasharray="2 4" vector-effect="non-scaling-stroke"/>` : ''}
     ${obj ? obj.svg : ''}
-    ${obj && box ? (([x, y, w, h]) => `<g stroke="${ACC}" fill="none"><rect x="${x}" y="${y}" width="${w}" height="${h}" stroke-opacity=".7" stroke-width=".8"/>
-      <path d="M${x} ${y + 8}V${y}H${x + 8}M${x + w - 8} ${y}H${x + w}V${y + 8}M${x + w} ${y + h - 8}V${y + h}H${x + w - 8}M${x + 8} ${y + h}H${x}V${y + h - 8}" stroke-width="1.6"/></g>
-      <text x="${x}" y="${y - 6}" fill="${ACC}" font-size="10" font-family="IBM Plex Mono, monospace">${ev.track} · ${ev.entity.toUpperCase()}</text>`)(obj.box) : ''}
-    ${crop ? '' : `<text x="14" y="24" fill="${TXT}" font-size="11" font-family="IBM Plex Mono, monospace" letter-spacing=".06em" opacity=".85">${c.code}  ${c.name.toUpperCase()}</text>
-    <text x="626" y="24" fill="${TXT}" font-size="11" font-family="IBM Plex Mono, monospace" text-anchor="end" opacity=".85">${DAY} ${stamp} ${TZ}</text>
-    <text x="14" y="346" fill="${TXT}" font-size="9" font-family="IBM Plex Mono, monospace" opacity=".45">SYNTHETIC DEMO FRAME</text>
-    ${masked ? `<text x="626" y="346" fill="${TXT}" font-size="9" font-family="IBM Plex Mono, monospace" text-anchor="end" opacity=".7">${masked}</text>` : ''}`}
+    ${obj && box ? (([x, y, w, h]) => `<g stroke="${ACC}" fill="none" vector-effect="non-scaling-stroke"><rect x="${x}" y="${y}" width="${w}" height="${h}" stroke-opacity=".7" stroke-width=".8" vector-effect="non-scaling-stroke"/>
+      <path d="M${x} ${y + 8 / ky}V${y}H${x + 8}M${x + w - 8} ${y}H${x + w}V${y + 8 / ky}M${x + w} ${y + h - 8 / ky}V${y + h}H${x + w - 8}M${x + 8} ${y + h}H${x}V${y + h - 8 / ky}" stroke-width="1.6" vector-effect="non-scaling-stroke"/></g>`)(obj.box) : ''}
+    </g>
+    ${region ? `<text ${mono(region.rect[0] + 4, region.rect[1] * ky - 5, 10, `fill="${ACC}" letter-spacing=".08em"`)}>${region.name.toUpperCase()}</text>` : ''}
+    ${obj && box ? `<text ${mono(obj.box[0], obj.box[1] * ky - 6, 10, `fill="${ACC}" paint-order="stroke" stroke="#000" stroke-opacity=".45" stroke-width="2"`)}>${String(ev.track).includes(':') ? '#' + String(ev.track).split(':').pop() : ev.track} · ${ev.entity.toUpperCase()}</text>` : ''}
+    ${crop ? '' : `<text ${mono(14, 24, 11, `fill="${TXT}" letter-spacing=".06em" opacity=".85" paint-order="stroke" stroke="#000" stroke-opacity=".5" stroke-width="2"`)}>${c.code}  ${c.name.toUpperCase()}</text>
+    <text ${mono(626, 24, 11, `fill="${TXT}" text-anchor="end" opacity=".85" paint-order="stroke" stroke="#000" stroke-opacity=".5" stroke-width="2"`)}>${ds().DAY} ${stamp} ${ds().TZ}</text>
+    ${c.real ? '' : `<text ${mono(14, H - 14, 9, `fill="${TXT}" opacity=".45"`)}>SYNTHETIC DEMO FRAME</text>`}
+    ${masked ? `<text ${mono(626, H - 14, 9, `fill="${TXT}" text-anchor="end" opacity=".7"`)}>${masked}</text>` : ''}`}
   </svg>`;
 }

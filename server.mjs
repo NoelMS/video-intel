@@ -5,6 +5,9 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync, createReadStream, s
 import { join, normalize, dirname, extname, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as api from './api.js';
+import * as setup from './setup.mjs';
+import * as indexer from './indexer.mjs';
+import * as DEMO from './data.js';
 
 const root = dirname(fileURLToPath(import.meta.url));
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.json': 'application/json',
@@ -42,6 +45,8 @@ function validRef(r, partial = false) {
   return out;
 }
 
+const validModel = m => typeof m === 'string' && /^[\w.\-]+(\/[\w.\-]+)*(:[\w.\-]+)?$/.test(m) && m.length <= 80 ? m : bad('model must be an Ollama model name like qwen3-vl:2b');
+
 function validSettings(b) {
   const out = {};
   if (b.depth != null) { if (!api.DEPTHS[b.depth]) bad('depth must be fast, balanced or deep'); out.depth = b.depth; }
@@ -58,6 +63,12 @@ function validSettings(b) {
     if ('exports' in p) { if (!api.EXPORTS[p.exports]) bad('exports must be allowed, watermarked or disabled'); o.exports = p.exports; }
   }
   if (b.operator != null) { if (!api.ROLES.includes(b.operator.role)) bad('role must be viewer, analyst or supervisor'); out.operator = { role: b.operator.role }; }
+  if (b.source != null) { if (!['demo', 'mine'].includes(b.source)) bad('source must be demo or mine'); out.source = b.source; }
+  if (b.vision != null) {
+    out.vision = {};
+    if ('model' in b.vision) out.vision.model = validModel(b.vision.model);
+    if ('setupSeen' in b.vision) { if (typeof b.vision.setupSeen !== 'boolean') bad('setupSeen must be boolean'); out.vision.setupSeen = b.vision.setupSeen; }
+  }
   return out;
 }
 
@@ -73,24 +84,42 @@ function validWatch(b, partial = false) {
 
 const str = (v, max, field) => { if (typeof v !== 'string' || !v.trim() || v.length > max) bad(`${field} must be 1-${max} characters`); return v.trim(); };
 const iso = (v, field) => { if (typeof v !== 'string' || Number.isNaN(Date.parse(v))) bad(`${field} must be an ISO date`); return new Date(v).toISOString(); };
-function validReg(b) {
-  const out = { name: str(b.name, 80, 'name'), location: str(b.location, 120, 'location'), tz: str(b.tz, 64, 'tz') };
+// Upload metadata travels in the query string; the body is the raw video stream.
+const VIDEO_EXT = ['.mp4', '.m4v', '.mov', '.mkv', '.avi', '.webm', '.ts', '.mts', '.m2ts', '.wmv', '.asf', '.flv', '.3gp', '.h264', '.h265', '.hevc', '.dav'];
+function validUpload(qs, type) {
+  const g = k => qs.get(k) ?? '';
+  if (!/^(video\/[\w.+-]+|application\/octet-stream)$/.test(type)) bad('Send the video as video/* or application/octet-stream');
+  const out = { name: str(g('name'), 80, 'name'), location: str(g('location') || 'Unspecified', 120, 'location'), tz: str(g('tz'), 64, 'tz'), start: iso(g('start'), 'start') };
   try { new Intl.DateTimeFormat('en', { timeZone: out.tz }); } catch { bad('unknown timezone'); }
-  const s = b.source || {};
-  if (s.kind === 'file') out.source = { kind: 'file', name: str(s.name, 200, 'source.name'), size: Number.isFinite(s.size) && s.size >= 0 ? s.size : bad('source.size'), type: typeof s.type === 'string' ? s.type.slice(0, 100) : '' };
-  else if (s.kind === 'url') { if (!/^(https?|rtsp):\/\/\S+$/.test(s.url || '') || s.url.length > 500) bad('source.url must be http(s) or rtsp'); out.source = { kind: 'url', url: s.url }; }
-  else bad('source.kind must be file or url');
-  out.start = iso(b.start, 'start');
-  if (b.end != null) { out.end = iso(b.end, 'end'); if (out.end <= out.start) bad('end must be after start'); }
-  out.neighbors = Array.isArray(b.neighbors) ? b.neighbors.map(n => api.camera(n) ? n : bad(`unknown neighbor ${n}`)) : [];
-  out.labels = Array.isArray(b.labels) ? b.labels.slice(0, 10).map(l => str(l, 60, 'label')) : [];
-  if (b.video != null) {
-    const v = b.video;
-    if (!(v.duration > 0) || !Number.isInteger(v.width) || !Number.isInteger(v.height)) bad('video needs duration, width, height');
-    out.video = { duration: v.duration, width: v.width, height: v.height };
-  }
-  out.thumbs = Array.isArray(b.thumbs) ? b.thumbs.slice(0, 12).map(t => typeof t === 'string' && t.startsWith('data:image/jpeg;base64,') && t.length < 80000 ? t : bad('thumbs must be small JPEG data URLs')) : [];
+  out.neighbors = g('neighbors') ? g('neighbors').split(',').map(n => indexer.listVideos().some(v => v.id === n) ? n : bad(`unknown neighbouring camera ${n}`)) : [];
+  out.labels = g('labels') ? g('labels').split(',').slice(0, 10).map(l => str(l, 60, 'label')) : [];
+  out.ext = (g('filename').match(/\.[a-z0-9]{1,5}$/i)?.[0] || '').toLowerCase();
+  if (!VIDEO_EXT.includes(out.ext)) bad(`Unsupported file type ${out.ext || '(none)'}`);
   return out;
+}
+
+// Serves a file with HTTP Range support so the original video can be scrubbed.
+function sendFile(req, res, file, type) {
+  if (!existsSync(file)) throw new HttpError(404, 'Not found');
+  const size = statSync(file).size, m = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range || '');
+  const head = { 'content-type': type, 'accept-ranges': 'bytes', 'cache-control': 'private, max-age=3600' };
+  if (!m) { res.writeHead(200, { ...head, 'content-length': size }); return createReadStream(file).pipe(res); }
+  const start = m[1] ? +m[1] : Math.max(0, size - +m[2]), end = m[1] && m[2] ? Math.min(+m[2], size - 1) : size - 1;
+  if (start > end || start >= size) { res.writeHead(416, { 'content-range': `bytes */${size}` }); return res.end(); }
+  res.writeHead(206, { ...head, 'content-range': `bytes ${start}-${end}/${size}`, 'content-length': end - start + 1 });
+  createReadStream(file, { start, end }).pipe(res);
+}
+const VIDEO_MIME = { '.mp4': 'video/mp4', '.m4v': 'video/mp4', '.mov': 'video/quicktime', '.webm': 'video/webm', '.mkv': 'video/x-matroska' };
+
+// The active dataset follows settings.source: the demo, or "My footage" rebuilt whenever indexed videos change.
+let mine = null, mineKey = null;
+async function applySource() {
+  const { source, vision, pipeline } = await api.getSettings();
+  indexer.configure({ model: vision.model, sampling: pipeline.sampling });
+  if (source !== 'mine') return api.useDataset(DEMO);
+  const key = indexer.listVideos().filter(v => v.status === 'ready').map(v => v.id + v.indexedAt).join();
+  if (key !== mineKey) { mine = indexer.dataset(); mineKey = key; }
+  api.useDataset(mine);
 }
 
 function liveStream(req, res, url) {
@@ -111,7 +140,9 @@ function startSearch({ text, scope = 'all', context = null, depth }) {
   if (depth != null && !api.DEPTHS[depth]) bad('depth must be fast, balanced or deep');
   const id = Math.random().toString(36).slice(2, 10), run = { events: [], done: false, listeners: new Set(), ac: new AbortController() };
   const push = (type, data) => { run.events.push([type, data]); run.listeners.forEach(l => l(type, data)); if (type !== 'stage') run.done = true; };
-  api.search(text, { scope, context, depth, signal: run.ac.signal, onStage: s => push('stage', s) })
+  const real = api.ds().source === 'mine';   // real footage: no simulated stage delays, and the local model verifies
+  api.search(text, { scope, context, depth, signal: run.ac.signal, onStage: s => push('stage', s),
+    speed: real ? 0 : 1, verify: real ? (e, question) => indexer.verify(e, question) : null })
     .then(r => push('result', r))
     .catch(e => push(e.name === 'AbortError' ? 'cancelled' : 'fail', { message: e.message }));
   runs.set(id, run);
@@ -154,9 +185,16 @@ const routes = [
     if (b.action !== 'reveal' || !api.event(b.eventId)) bad('only reveal of a known eventId is audited');
     return api.addAudit({ action: 'reveal', eventId: b.eventId, role: (await api.getSettings()).operator.role }); // api enforces the role (403)
   }],
-  ['GET', /^registrations$/, () => api.getRegistered()],
-  ['POST', /^registrations$/, async req => api.registerCamera(validReg(await body(req)))],
-  ['DELETE', /^registrations\/([\w-]+)$/, async (_, [id]) => { await api.deleteRegistered(id); return { ok: true }; }],
+  ['GET', /^dataset$/, () => api.ds()],
+  ['GET', /^videos$/, () => indexer.listVideos()],
+  ['POST', /^videos$/, (req, _, url) => indexer.addVideo(req, validUpload(url.searchParams, (req.headers['content-type'] || '').split(';')[0].trim()))],
+  ['POST', /^videos\/([\w-]+)\/reindex$/, (_, [id]) => { indexer.reindex(id); return { ok: true }; }],
+  ['DELETE', /^videos\/([\w-]+)$/, (_, [id]) => { indexer.removeVideo(id); return { ok: true }; }],
+  ['GET', /^setup$/, async () => setup.status((await api.getSettings()).vision.model)],
+  ['POST', /^setup\/install$/, async req => {
+    const b = await body(req);
+    return setup.install({ ffmpeg: b.ffmpeg === true, ollama: b.ollama === true, model: b.model == null ? null : validModel(b.model) });
+  }],
   ['GET', /^watches$/, () => api.getWatches()],
   ['POST', /^watches$/, async req => api.createWatch(validWatch(await body(req)))],
   ['PUT', /^watches\/([\w-]+)$/, async (req, [id]) => { await api.updateWatch(id, validWatch(await body(req), true)); return { ok: true }; }],
@@ -203,22 +241,33 @@ function guard(req) {
   if (req.method === 'POST' && SIMPLE.includes((req.headers['content-type'] || '').split(';')[0].trim().toLowerCase())) throw new HttpError(415, 'Send JSON (or video) with a content-type');
 }
 
-export const activity = { busy: () => false }; // the indexer hooks in so idle exit waits for running jobs
+export const activity = { busy: () => !!setup.busy() || indexer.busy() }; // idle exit waits for installs and indexing
 
 export function start(port = 0, storeFile = join(root, '.store', 'store.json'), host = '127.0.0.1') {
   api.useStorage(fileStore(storeFile));
+  indexer.useStorage(api.kv.load, api.kv.save);
+  indexer.useStoreDir(dirname(storeFile));
+  applySource().then(indexer.resume);             // continue any indexing interrupted by a restart
   const server = createServer(async (req, res) => {
     const url = new URL(req.url, 'http://x');
     try {
       guard(req);
       if (!url.pathname.startsWith('/api/')) return serveStatic(res, url.pathname);
       const path = url.pathname.slice(5), m = path.match(/^search\/(\w+)\/events$/);
+      let f;
+      if (req.method === 'GET' && (f = path.match(/^videos\/([\w-]+)\/file$/))) {
+        const v = indexer.listVideos().find(x => x.id === f[1]);
+        if (!v) throw new HttpError(404, 'Not found');
+        return sendFile(req, res, indexer.videoFile(v), VIDEO_MIME[extname(v.file)] || 'application/octet-stream');
+      }
+      if (req.method === 'GET' && (f = path.match(/^videos\/([\w-]+)\/frames\/(\d+)$/))) return sendFile(req, res, indexer.frameFile(f[1], +f[2]), 'image/jpeg');
+      await applySource();
       if (m && req.method === 'GET') return sse(res, m[1]);
       if (path === 'live' && req.method === 'GET') return liveStream(req, res, url);
       for (const [method, re, fn] of routes) {
         const hit = path.match(re);
         if (hit && method === req.method) {
-          const out = await fn(req, hit.slice(1));
+          const out = await fn(req, hit.slice(1), url);
           res.writeHead(200, { 'content-type': 'application/json' });
           return res.end(JSON.stringify(out));
         }

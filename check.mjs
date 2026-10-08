@@ -67,7 +67,8 @@ assert.ok(!(await api.getSaved()).some(x => x.id === 'journey:A17'));
 // server: persistence + validation + SSE stages
 const { start } = await import('./server.mjs');
 const { tmpdir } = await import('node:os');
-const store = `${tmpdir()}/vi-check-${Date.now()}.json`;
+const { mkdtempSync, rmSync, writeFileSync, mkdirSync } = await import('node:fs');
+const storeDir = mkdtempSync(`${tmpdir()}/vi-check-`), store = `${storeDir}/store.json`;
 let srv = await start(0, store);
 const base = `http://localhost:${srv.address().port}/api/`;
 const call = (p, method = 'GET', body, headers = { 'content-type': 'application/json' }) => fetch(base + p, { method, headers, body: body && JSON.stringify(body) }).then(async r => [r.status, await r.json()]);
@@ -85,12 +86,12 @@ assert.match(sse, /event: stage/); assert.match(sse, /event: result\ndata: .*"st
 assert.equal((await call('audit', 'POST', { action: 'reveal', eventId: 'ev_091412' }))[0], 403, 'analyst cannot reveal');
 assert.equal((await call('settings', 'PUT', { privacy: { exports: 'leak' } }))[0], 400);
 assert.equal((await call('watches', 'POST', { text: 'x', scope: 'all', from: '25:00', to: '06:00' }))[0], 400, 'bad schedule rejected');
-const reg = { name: 'Dock East', location: 'Warehouse', tz: 'Asia/Kolkata', source: { kind: 'file', name: 'a.mp4', size: 10, type: 'video/mp4' }, start: '2026-10-08T09:00:00Z' };
-assert.equal((await call('registrations', 'POST', { ...reg, tz: 'Mars/Olympus' }))[0], 400, 'bad timezone rejected');
-assert.equal((await call('registrations', 'POST', { ...reg, thumbs: ['data:text/html,<script>'] }))[0], 400, 'non-jpeg thumb rejected');
-assert.equal((await call('registrations', 'POST', { ...reg, source: { kind: 'url', url: 'javascript:alert(1)' } }))[0], 400);
-const [okReg, row] = await call('registrations', 'POST', reg);
-assert.equal(okReg, 200); assert.equal(row.status, 'frames-extracted');
+// uploads: metadata is validated before a byte is stored
+const up = (qs, type = 'video/mp4', bytes = 'x') => fetch(base + 'videos?' + new URLSearchParams(qs), { method: 'POST', headers: { 'content-type': type }, body: bytes }).then(r => r.status);
+const meta = { name: 'Dock East', location: 'Warehouse', tz: 'Asia/Kolkata', start: '2026-10-08T09:00:00Z', filename: 'dock.mp4' };
+assert.equal(await up({ ...meta, tz: 'Mars/Olympus' }), 400, 'bad timezone rejected');
+assert.equal(await up({ ...meta, filename: 'run.exe' }), 400, 'non-video file type rejected');
+assert.equal(await up(meta, 'text/plain'), 415, 'cross-site simple upload refused');
 assert.equal((await call('saved', 'POST', { track: 'A17' }))[0], 200);
 assert.equal((await call('saved/journey%3AA17', 'PUT', { lane: 'primary', index: 0 }))[0], 200);
 assert.equal((await call('saved/journey%3AA17', 'PUT', { lane: 'nowhere', index: 0 }))[0], 400);
@@ -102,13 +103,47 @@ assert.equal(srv.address().address, '127.0.0.1', 'server is not exposed to the n
 const mem = await (await fetch(`http://localhost:${srv.address().port}/api/memory`)).json();
 assert.ok(mem.some(r => r.name === 'East Gate'), 'referent survives server restart');
 srv.close();
-(await import('node:fs')).rmSync(store);
+
 
 // icon-launched server exits on its own once idle
 const { spawn } = await import('node:child_process');
 const child = spawn(process.execPath, ['server.mjs'], { env: { ...process.env, PORT: '8799', VI_IDLE_EXIT: '1500', VI_STORE: store } });
 const exitCode = await new Promise((res, rej) => { child.on('exit', res); setTimeout(() => { child.kill(); rej(new Error('idle server did not exit')); }, 20000); });
 assert.equal(exitCode, 0);
-(await import('node:fs')).rmSync(store, { force: true });
+
+// indexer: frame-to-frame tracking is a pure function
+const indexer = await import('./indexer.mjs');
+const person = (n, t, x) => ({ n, t, lighting: 'good', objects: [{ type: 'person', label: 'man in red jacket', colors: ['red'], attributes: ['jacket'], action: 'walking', box: [x, 100, 40, 120], visibility: 'clear' }] });
+const tr = indexer.track([person(1, 0, 100), person(2, 2, 110), person(3, 4, 400), person(4, 30, 405)], 6);
+assert.deepEqual(tr.map(t => t.dets.map(d => d.n)), [[1, 2], [3], [4]], 'overlap links, a jump or a long gap starts a new track');
+
+// full pipeline on a real (generated) video with ffmpeg, a stand-in for the vision model, and search over it
+const { ffmpegPath } = await import('./setup.mjs');
+if (ffmpegPath()) {
+  srv = await start(0, store);
+  const b2 = `http://localhost:${srv.address().port}/api/`;
+  const clip = `${storeDir}/clip.mp4`;
+  await new Promise((res, rej) => spawn(ffmpegPath(), ['-v', 'error', '-f', 'lavfi', '-i', 'testsrc=duration=8:size=320x180:rate=10', '-pix_fmt', 'yuv420p', clip])
+    .on('exit', c => c ? rej(new Error('ffmpeg test clip failed')) : res()));
+  let k = 0;
+  indexer.configure({ describe: async () => ({ objects: [{ ...person(0, 0, 100 + 20 * k++).objects[0] }], faces: [[10, 10, 20, 20]], plates: [], lighting: 'good' }) });
+  const r = await fetch(b2 + 'videos?' + new URLSearchParams({ ...meta, filename: 'clip.mp4' }), { method: 'POST', headers: { 'content-type': 'video/mp4' }, body: (await import('node:fs')).readFileSync(clip) });
+  assert.equal(r.status, 200, await r.clone().text());
+  for (let i = 0; i < 100 && (await (await fetch(b2 + 'videos')).json())[0].status !== 'ready'; i++) await new Promise(res => setTimeout(res, 200));
+  const vid = (await (await fetch(b2 + 'videos')).json())[0];
+  assert.equal(vid.status, 'ready', JSON.stringify(vid));
+  assert.equal(Math.round(vid.duration), 8);
+  await fetch(b2 + 'settings', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ source: 'mine' }) });
+  const mine = await (await fetch(b2 + 'dataset')).json();
+  assert.equal(mine.cameras.length, 1); assert.ok(mine.events.length >= 1 && mine.events[0].attrs.includes('red'));
+  assert.equal((await fetch(b2 + `videos/${vid.id}/frames/1`)).headers.get('content-type'), 'image/jpeg');
+  const ranged = await fetch(b2 + `videos/${vid.id}/file`, { headers: { range: 'bytes=0-99' } });
+  assert.equal(ranged.status, 206); assert.equal((await ranged.arrayBuffer()).byteLength, 100);
+  const [, { id: sid }] = await (async () => { const x = await fetch(b2 + 'search', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text: 'Find the man in a red jacket', depth: 'fast' }) }); return [x.status, await x.json()]; })();
+  assert.match(await (await fetch(b2 + `search/${sid}/events`)).text(), /"status":"supported"/, 'search runs over indexed footage');
+  indexer.configure({ describe: null });
+  srv.close();
+} else console.log('(ffmpeg not installed: skipped the video pipeline check)');
+rmSync(storeDir, { recursive: true, force: true });
 
 console.log('all flows ok');
