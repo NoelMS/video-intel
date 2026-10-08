@@ -557,20 +557,32 @@ kbd { font: 500 10.5px/1 var(--mono); color: var(--text-2); padding: 3px 5px 2px
 
 /* local analysis setup */
 dialog.setup { width: min(760px, 96vw); }
-.setup { display: grid; gap: 22px; }
-.setup .lede { font-size: 15.5px; }
-.parts > li { display: grid; grid-template-columns: 22px 1fr; gap: 12px; padding: 14px 0; border-top: 1px solid var(--line); }
-.parts .st { color: var(--muted); font-size: 15px; line-height: 1.4; } .parts .ok .st { color: var(--ok); }
-.parts p { font-size: 14.5px; } .parts p.dim { font-size: 13.5px; margin-top: 2px; }
-.models { border: 0; padding: 0; margin: 10px 0 0; display: grid; gap: 4px; }
-.models .opt { padding: 8px 0; border-bottom: 0; }
-.rec { font: 500 10.5px/1 var(--mono); color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); border-radius: 999px; padding: 2px 7px; margin-left: 4px; }
-.custom-model { display: block; margin-top: 6px; width: 240px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r1); padding: 6px 8px; font: 13px var(--mono); }
+.kicker { font: 600 13px/1.4 var(--sans); color: var(--text-2); margin: 0 0 6px; }
+.setup { display: grid; gap: 20px; }
+.setup-title { font: 700 28px/1.15 var(--sans); letter-spacing: -.025em; max-width: 24ch; }
+.setup .lede { font-size: 15px; color: var(--text-2); max-width: 60ch; }
+.parts > li { display: grid; grid-template-columns: 20px 1fr; gap: 14px; padding: 16px 0; border-top: 1px solid var(--line); }
+.parts .st svg { width: 18px; height: 18px; margin-top: 1px; fill: none; stroke: var(--line-strong); stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+.parts .ok .st svg { stroke: var(--ok); } .parts .ok .st circle { fill: color-mix(in srgb, var(--ok) 14%, transparent); }
+.pn { font: 600 15px/1.4 var(--sans); display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px; }
+.tag { font: 500 12.5px/1 var(--sans); color: var(--muted); } .ok .tag { color: var(--ok); }
+.pd { display: block; font-size: 13.5px; color: var(--muted); margin-top: 3px; }
+.models { border: 0; padding: 0; margin: 12px 0 0; display: grid; gap: 8px; }
+.models .opt { display: grid; grid-template-columns: 18px 1fr; gap: 12px; align-items: start; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--r2); cursor: pointer; transition: border-color var(--fast), background var(--fast); }
+.models .opt:hover { border-color: var(--line-strong); }
+.models .opt:has(input:checked) { border-color: color-mix(in srgb, var(--accent) 60%, transparent); background: color-mix(in srgb, var(--accent) 5%, transparent); }
+.models .opt input { margin: 3px 0 0; accent-color: var(--accent); }
+.models[disabled] .opt { cursor: default; opacity: .7; }
+.on { font: 600 14px/1.4 var(--sans); display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
+.size { font: 500 12.5px/1 var(--sans); color: var(--muted); font-variant-numeric: tabular-nums; }
+.rec { font: 600 12px/1 var(--sans); color: var(--accent); }
+.custom-model { display: block; margin-top: 8px; width: 240px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r1); padding: 7px 9px; font: 13px var(--mono); }
 .progress li { display: grid; grid-template-columns: 1fr 160px 110px; gap: 12px; align-items: center; padding: 6px 0; font-size: 13.5px; }
 .progress .bar { height: 3px; background: var(--line); position: relative; } .progress .bar i { position: absolute; inset: 0 auto 0 0; background: var(--accent); transition: width var(--med); }
 .progress .done span:first-child { color: var(--ok); } .progress .failed span:first-child { color: var(--err); }
 .progress .mono { font-size: 11px; text-align: right; }
 .local { margin-top: 48px; max-width: 880px; }
+.boot-fail { max-width: 640px; margin: 18vh auto; padding: 0 24px; display: grid; gap: 14px; }
 @media (max-width: 680px) { .progress li { grid-template-columns: 1fr; } }
 
 /* your recordings */
