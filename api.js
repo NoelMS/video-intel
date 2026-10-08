@@ -262,7 +262,7 @@ export function assess(e, q, { cross = true } = {}) {
   ];
 }
 
-// ---------- standing queries (§33), alerts (§34), live replay (§32) ----------
+// ---------- standing queries (§33), alerts (§34); the server checks each newly indexed recording ----------
 const SEED_WATCHES = [
   { id: 'w_rear', text: 'Anyone entering the rear entrance', scope: 'all', from: '09:30', to: '10:00', status: 'active', created: '2026-10-05' },
   { id: 'w_van', text: 'White van at the loading area', scope: 'all', from: '09:00', to: '10:00', status: 'active', created: '2026-10-06' },
@@ -294,27 +294,6 @@ export function matchWatch(w, e, refs) {
   if (q.intent === 'find' && !q.entity && !q.attrs.length && !q.location) return false;
   if (!inSchedule(sec(e.time), w) || (w.scope !== 'all' && w.scope !== e.cameraId)) return false;
   return checks(e, q, [q.after ?? 0, q.before ?? 86400]).every(c => c.ok);
-}
-
-// Camera stream state at replay time t: no signal when the recording has nothing at t.
-export const streamState = (c, t) => c.coverage.some(([a, b]) => t >= sec(a) && t < sec(b)) ? 'STREAMING' : 'NO SIGNAL';
-
-// Replays the recorded window as if it were arriving live. Same detection -> watch path a real stream would take.
-export async function live({ speed = 60, from = W[0], tickMs = 250, onTick = () => {}, onEvent = () => {}, onAlert = () => {}, signal } = {}) {
-  const refs = await getMemory(), watches = (await getWatches()).filter(w => w.status === 'active');
-  const queue = [...D.events].sort((a, b) => sec(a.time) - sec(b.time)).filter(e => sec(e.time) > from); // > so a resume never replays the event it paused on
-  let t = from;
-  while (t < W[1]) {
-    await wait(tickMs, signal);
-    t = Math.min(W[1], t + speed * Math.max(tickMs, 250) / 1000);
-    while (queue.length && sec(queue[0].time) <= t) {
-      const e = queue.shift(), t0 = performance.now();
-      const hits = watches.filter(w => matchWatch(w, e, refs));
-      onEvent({ id: e.id, watches: hits.map(w => w.id), evalMs: +(performance.now() - t0).toFixed(2) });
-      for (const w of hits) { const a = await addAlert(w, e); if (a) onAlert(a); }
-    }
-    onTick({ t, streams: Object.fromEntries(D.cameras.map(c => [c.id, streamState(c, t)])) });
-  }
 }
 
 // ---------- POST /search (stages stream through onStage, as SSE would) ----------

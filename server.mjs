@@ -183,16 +183,6 @@ async function applySource() {
   api.useDataset(mine);
 }
 
-function liveStream(req, res, url) {
-  const speed = +(url.searchParams.get('speed') || 60), from = +(url.searchParams.get('from') || api.W[0]);
-  if (!(speed >= 1 && speed <= 3600) || !(from >= api.W[0] && from <= api.W[1])) throw new HttpError(400, 'speed 1-3600, from inside the recorded window');
-  res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
-  const ac = new AbortController(), send = (type, data) => res.write(`event: ${type}\ndata: ${JSON.stringify(data)}\n\n`);
-  req.on('close', () => ac.abort());
-  api.live({ speed, from, signal: ac.signal, onTick: d => send('tick', d), onEvent: d => send('event', d), onAlert: d => send('alert', d) })
-    .then(() => { send('end', {}); res.end(); }).catch(() => res.end());
-}
-
 const runs = new Map(); // search id -> { events, done, listeners, ac }
 // ablation (evaluation only): { image: false } drops the object-crop similarity, { frames: false } the frame
 // similarity while each object is on screen, { labels: false } the label words, { verify: false } the vision model's
@@ -381,7 +371,6 @@ export function start(port = 0, storeFile = join(root, '.store', 'store.json'), 
       }
       await applySource();
       if (m && req.method === 'GET') return sse(res, m[1]);
-      if (path === 'live' && req.method === 'GET') return liveStream(req, res, url);
       for (const [method, re, fn] of routes) {
         const hit = path.match(re);
         if (hit && method === req.method) {

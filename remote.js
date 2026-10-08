@@ -48,18 +48,6 @@ export const updateWatch = (id, patch) => j('watches/' + id, { method: 'PUT', bo
 export const deleteWatch = id => j('watches/' + id, { method: 'DELETE' });
 export const getAlerts = () => j('alerts');
 
-// GET /live streams the server-side replay (tick, event, alert, end).
-export function live({ speed = 60, from, onTick = () => {}, onEvent = () => {}, onAlert = () => {}, signal } = {}) {
-  return new Promise((resolve, reject) => {
-    const es = new EventSource(`api/live?speed=${speed}${from ? '&from=' + from : ''}`);
-    signal?.addEventListener('abort', () => { es.close(); reject(new DOMException('Live stopped', 'AbortError')); }, { once: true });
-    es.addEventListener('tick', e => onTick(JSON.parse(e.data)));
-    es.addEventListener('event', e => onEvent(JSON.parse(e.data)));
-    es.addEventListener('alert', e => onAlert(JSON.parse(e.data)));
-    es.addEventListener('end', () => { es.close(); resolve(); });
-    es.onerror = () => { if (es.readyState === EventSource.CLOSED) return; es.close(); reject(new Error('Live stream disconnected')); };
-  });
-}
 export const getSetup = () => j('setup');
 export const installSetup = parts => j('setup/install', { method: 'POST', body: parts });
 export const getDataset = () => j('dataset');

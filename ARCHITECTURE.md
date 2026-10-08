@@ -64,7 +64,7 @@ flowchart LR
     SRV --> STATIC[static files<br/>+ inject meta vi-backend]
   end
   RM -->|REST| SRV
-  RM -->|SSE: search stages, live replay| SRV
+  RM -->|SSE: search stages| SRV
 ```
 
 Static hosting (`python -m http.server`) never injects the meta tag, so the browser runs `api.js` directly against `localStorage`, and only the demo dataset is available.
@@ -121,22 +121,21 @@ flowchart LR
   HOP --> GAP[coverage gaps on<br/>neighbouring cameras]
 ```
 
-## 5. Live replay, watches and alerts
+## 5. Live cameras, watches and alerts
 
 ```mermaid
 sequenceDiagram
-  participant UI as app.js Live view
-  participant L as api.live / GET /api/live (SSE)
-  participant W as matchWatch
+  participant F as sources.mjs (live camera)
+  participant I as indexer
+  participant W as server alertOn + matchWatch
   participant S as store
-  UI->>L: start(speed, from)
-  loop every tick over recorded window
-    L->>W: each arriving event vs active watches
-    W-->>L: true / false / null (needs referent)
-    L->>S: addAlert (dedup per watch+event)
-    L-->>UI: onEvent, onAlert, onTick(stream states)
+  participant UI as app.js Live view (polls)
+  loop every capture
+    F->>I: clip or segment
+    I->>W: onReady(recording)
+    W->>S: addAlert per matching event (dedup per watch+event)
+    UI->>S: feeds, events by cameraKey, alerts
   end
-  L-->>UI: end
 ```
 
 ## 6. UI structure (`app.js`)
@@ -146,7 +145,7 @@ graph TD
   R[render] --> H[header<br/>STORE mode, nav, theme]
   R --> VIEWS{S.view}
   VIEWS --> V1[searchView<br/>composer, interpretation, trail, result]
-  VIEWS --> V2[liveView<br/>streams, feed, watches, alerts]
+  VIEWS --> V2[liveView<br/>live cameras, detections, watches, alerts]
   VIEWS --> V3[camerasView<br/>coverage, upload + indexing status]
   VIEWS --> V4[memoryView<br/>saved places / referents]
   VIEWS --> V5[investigationView<br/>evidence board lanes, notes, export]

@@ -48,12 +48,12 @@ await api.setSettings({ operator: { role: 'supervisor' } });
 await api.addAudit({ action: 'reveal', eventId: 'ev_091412', role: 'supervisor' });
 assert.equal((await api.getAudit()).length, 1);
 
-// §32-34 standing queries fire during replay, once per watch+event
-const fired = [];
-await api.live({ speed: 3600, tickMs: 0, onAlert: a => fired.push(a.id) });
+// §33-34 standing queries match exactly what they describe, once per watch+event
+const refs0 = await api.getMemory(), ws = (await api.getWatches()).filter(w => w.status === 'active'), hits0 = [];
+for (const e of api.ds().events) for (const w of ws) if (api.matchWatch(w, e, refs0)) hits0.push([w, e]);
+const fired = []; for (const [w, e] of hits0) { const a = await api.addAlert(w, e); if (a) fired.push(a.id); }
 assert.deepEqual(fired.sort(), ['w_rear:ev_094105', 'w_van:ev_092630']);
-const again = []; await api.live({ speed: 3600, tickMs: 0, onAlert: a => again.push(a) });
-assert.equal(again.length, 0, 'no duplicate alerts on replay');
+for (const [w, e] of hits0) assert.equal(await api.addAlert(w, e), null, 'no duplicate alerts');
 assert.equal(api.matchWatch({ text: 'Anyone at the east dock', scope: 'all', from: '00:00', to: '23:59' }, api.event('ev_091412'), await api.getMemory()), null);
 assert.equal(api.inSchedule(api.sec('23:00:00'), { from: '20:00', to: '06:00' }), true);
 // a thing no label names is a find (refused by the checks), never "what happened"; a watch for it never fires
@@ -100,8 +100,6 @@ assert.equal(await up(meta, 'text/plain'), 415, 'cross-site simple upload refuse
 assert.equal((await call('saved', 'POST', { track: 'A17' }))[0], 200);
 assert.equal((await call('saved/journey%3AA17', 'PUT', { lane: 'primary', index: 0 }))[0], 200);
 assert.equal((await call('saved/journey%3AA17', 'PUT', { lane: 'nowhere', index: 0 }))[0], 400);
-const liveText = await (await fetch(base + 'live?speed=3600')).text();
-assert.match(liveText, /event: alert/); assert.match(liveText, /event: end/);
 srv.close();
 srv = await start(0, store);                                                         // restart: memory persists
 assert.equal(srv.address().address, '127.0.0.1', 'server is not exposed to the network');

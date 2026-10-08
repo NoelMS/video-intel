@@ -23,7 +23,7 @@ let cams = [], allEvents = [];
 const S = {
   view: 'search', phase: 'idle', query: '', scope: 'all', stages: [], interp: null, res: null, context: null, error: null,
   memory: [], history: [], saved: [], notes: '', settings: api.DEFAULT_SETTINGS, depth: null, reveal: false, audit: [], watches: [], alerts: [], videos: [],
-  live: { running: false, done: false, t: api.W[0], speed: 60, feed: [], streams: {}, lastAt: null, ac: null }, zoom: 0, jtab: 'sequence', resolver: null, layer: null, camFocus: null, abort: null,
+  zoom: 0, jtab: 'sequence', resolver: null, layer: null, camFocus: null, abort: null,
 };
 const set = patch => { Object.assign(S, patch); render(); };
 
@@ -894,10 +894,11 @@ function pollVideos() {
       // standing queries are checked on the server as each recording finishes indexing; say when one matched
       const seen = new Set(S.alerts.map(a => a.id));
       S.alerts = await api.getAlerts();
-      for (const a of S.alerts.filter(a => !seen.has(a.id))) toast(`Alert · ${a.watchText}`);
-      if (S.view !== 'cameras') render();
+      for (const a of S.alerts.filter(a => !seen.has(a.id))) ev(a.eventId) ? notify(a) : toast(`Alert · ${a.watchText}`);
+      if (!['cameras', 'live'].includes(S.view)) render();
     }
     if (S.view === 'cameras') $('#videos') ? ($('#videos').innerHTML = videosList()) : render();
+    if (S.view === 'live') $('#live-now') ? ($('#live-now').innerHTML = liveNow()) : render();   // the watch form keeps its input
     // keep polling while clips index, imports download, or live cameras capture
     if (S.videos.some(v => WORKING.includes(v.status)) || S.ingest.imports.some(i => ['queued', 'downloading'].includes(i.state)) || S.ingest.feeds.some(f => f.active || f.capturing)) videoPoll = setTimeout(tick, 3000);
     else if (S.view === 'cameras') render();
@@ -1049,15 +1050,18 @@ async function submitUrls(form) {
 
 // Cameras page: live cameras, imports and the indexing backlog, above the recordings (grouped per camera).
 const FEED_KIND = { tfl: 'TfL JamCam · 10 s clips', caltrans: 'Caltrans live stream', url: 'Stream' };
+// The picture: the provider's current still (TfL and Caltrans refresh it), else the newest captured clip's first frame.
+const feedImage = f => f.image || (S.videos.filter(v => v.cameraKey === f.cameraKey && v.status === 'ready').at(-1)?.id ?? null);
+const feedItem = f => { const img = feedImage(f); return `<li class="feed ${f.active ? '' : 'paused'}">
+  ${img ? `<img loading="lazy" src="${esc(f.image || `api/videos/${img}/frames/1`)}" alt="">` : '<span class="noimg"></span>'}
+  <div><p class="cn">${esc(f.name)}</p><p class="mono dim">${esc(FEED_KIND[f.provider] || 'Stream')} · ${f.continuous ? `continuous, ${f.clipSec} s segments` : `every ${f.intervalMin} min${f.kind === 'stream' ? ` for ${f.clipSec} s` : ''}`} · ${f.captures} capture${f.captures === 1 ? '' : 's'}</p>
+    <p class="mono ${f.lastError ? 'warn' : 'dim'}">${f.active ? esc(f.state) : 'Paused'}${f.last ? ` · last ${new Date(f.last).toLocaleTimeString('en-GB')}` : ''}${f.lastError ? ` · ${esc(f.lastError)}` : ''}</p></div>
+  <div class="acts"><button class="txt" data-act="feed-capture" data-id="${f.id}" ${f.capturing ? 'disabled' : ''}>${f.capturing ? 'Capturing…' : 'Capture now'}</button><button class="txt" data-act="feed-toggle" data-id="${f.id}" data-on="${f.active ? 0 : 1}">${f.active ? 'Pause' : 'Resume'}</button><button class="txt danger" data-act="feed-del" data-id="${f.id}">Remove</button></div></li>`; };
 function ingestPanel() {
   const ig = S.ingest; if (!ig) return '';
   const b = ig.backlog, active = ig.imports.filter(i => ['queued', 'downloading'].includes(i.state)), failed = ig.imports.filter(i => i.state === 'failed');
   return `${b.clips ? `<p class="backlog"><b>Indexing backlog</b> · ${b.clips} clip${b.clips === 1 ? '' : 's'} · ${hmsDur(b.seconds)} of footage${b.eta ? ` · up to ${hmsDur(b.eta)} at ${b.secPerFrame.toFixed(1)} s a frame (measured)` : ''}${b.clips >= ig.maxBacklog ? ' · live captures pause until it clears' : ''}</p>` : ''}
-    ${ig.feeds.length ? `<section class="feeds"><p class="eyebrow">LIVE CAMERAS · capturing while the app is open</p><ol>${ig.feeds.map(f => `<li class="feed ${f.active ? '' : 'paused'}">
-      ${f.image ? `<img loading="lazy" src="${esc(f.image)}" alt="">` : '<span class="noimg"></span>'}
-      <div><p class="cn">${esc(f.name)}</p><p class="mono dim">${esc(FEED_KIND[f.provider] || 'Stream')} · ${f.continuous ? `continuous, ${f.clipSec} s segments` : `every ${f.intervalMin} min${f.kind === 'stream' ? ` for ${f.clipSec} s` : ''}`} · ${f.captures} capture${f.captures === 1 ? '' : 's'}</p>
-        <p class="mono ${f.lastError ? 'warn' : 'dim'}">${f.active ? esc(f.state) : 'Paused'}${f.last ? ` · last ${new Date(f.last).toLocaleTimeString('en-GB')}` : ''}${f.lastError ? ` · ${esc(f.lastError)}` : ''}</p></div>
-      <div class="acts"><button class="txt" data-act="feed-capture" data-id="${f.id}" ${f.capturing ? 'disabled' : ''}>${f.capturing ? 'Capturing…' : 'Capture now'}</button><button class="txt" data-act="feed-toggle" data-id="${f.id}" data-on="${f.active ? 0 : 1}">${f.active ? 'Pause' : 'Resume'}</button><button class="txt danger" data-act="feed-del" data-id="${f.id}">Remove</button></div></li>`).join('')}</ol>
+    ${ig.feeds.length ? `<section class="feeds"><p class="eyebrow">LIVE CAMERAS · capturing while the app is open</p><ol>${ig.feeds.map(feedItem).join('')}</ol>
       <p class="attrib">${[...new Set(ig.feeds.map(f => ig.attribution[f.provider]).filter(Boolean))].join(' ')}</p></section>` : ''}
     ${active.length || failed.length ? `<section class="imports"><p class="eyebrow">IMPORTS</p><ol>${[...active, ...failed].slice(0, 12).map(i => `<li><span>${esc(i.name)} <span class="mono dim">${esc(i.url.split('/').pop())}</span></span>
       <span class="mono ${i.state === 'failed' ? 'warn' : 'dim'}">${i.state === 'failed' ? esc(i.error) : i.state === 'downloading' ? `${mb(i.done)} / ${mb(i.total || 0)}` : 'queued'}</span></li>`).join('')}</ol>
@@ -1140,53 +1144,43 @@ async function switchSource(src) {
   if (mode !== 'server' || (src === 'mine') === !ds().DEMO) return;
   S.settings = await api.setSettings({ source: src });
   await loadDataset();
-  S.live.ac?.abort();
-  Object.assign(S.live, { t: W[0], feed: [], streams: {}, done: false, lastAt: null });
   Object.assign(S, { phase: 'idle', res: null, interp: null, stages: [], context: null, scope: 'all', query: '', zoom: 0 });
   if (src === 'mine') { S.videos = await api.getVideos(); S.setup = await api.getSetup(); pollVideos(); }
   render();
 }
 
 // ---------- live (§32), standing queries (§33), alerts (§34) ----------
-// Simulated: replays the recorded hour. Labelled as such everywhere; nothing here claims to be happening now.
+// Live is the cameras being captured now (Cameras → Add live cameras): no uploads, no archives, no replay. Each new
+// capture is indexed and checked against the standing queries on the server; this page shows what came in.
+const liveKeys = () => new Set((S.ingest?.feeds || []).map(f => f.cameraKey));
+const liveCamsNow = () => cams.filter(c => liveKeys().has(c.id));
+const nowSec = () => { const d = new Date(); return d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds(); };
 function liveView() {
-  const L = S.live;
-  return `<section class="page"><header class="page-h"><p class="eyebrow">LIVE · SIMULATED</p><h1>Watching the replay.</h1>
-    <p class="lede">No live ingest is connected. This replays the indexed footage through the same detection and standing-query path a live stream would use. Nothing shown here is happening now.</p></header>
-    <div class="live-bar">
-      <div><p class="eyebrow">REPLAY CLOCK</p><div id="live-clock">${liveClock()}</div></div>
-      <div class="acts">
-        <button class="btn primary" data-act="live-toggle">${L.running ? 'Pause' : L.done ? 'Replay again' : L.t > W[0] ? 'Resume' : 'Start replay'}</button>
-        <label class="mono">SPEED <select id="live-speed">${[30, 60, 120, 300].map(s => `<option value="${s}" ${L.speed === s ? 'selected' : ''}>${s}×</option>`).join('')}</select></label>
-        ${L.t > W[0] && !L.running ? `<button class="txt" data-act="live-reset">Reset to ${hm(W[0])}</button>` : ''}</div>
-    </div>
-    <div class="live-grid">
-      <section><p class="eyebrow">STREAMS</p><ul id="live-cams" class="live-cams">${liveCams()}</ul></section>
-      <section><p class="eyebrow">DETECTIONS</p><ol id="live-feed" class="live-feed">${liveFeed()}</ol></section>
-    </div>
+  const feeds = S.ingest?.feeds || [];
+  if (!feeds.length) return `<section class="page"><header class="page-h"><p class="eyebrow">LIVE</p><h1>No live cameras yet.</h1>
+    <p class="lede">Live shows public or network cameras being captured now: London and California traffic cameras, or any RTSP/HLS stream. Uploaded recordings and archives stay on the Cameras page.</p>
+    <div class="acts">${mode !== 'server' ? '<span class="dim">Live cameras need the local server: open Video Intelligence.exe.</span>'
+      : ds().DEMO ? '<button class="btn primary" data-act="source" data-src="mine">Switch to My footage</button>' : '<button class="btn primary" data-act="src-open" data-tab="tfl">Add live cameras</button>'}</div></header></section>`;
+  return `<section class="page"><header class="page-h"><p class="eyebrow">LIVE · ${feeds.filter(f => f.active).length} of ${feeds.length} camera${feeds.length === 1 ? '' : 's'} capturing</p><h1>What the cameras see now.</h1>
+    <p class="lede">Each camera is captured as clips while the app is open; every clip is analysed here and checked against your standing queries as soon as it is indexed.</p></header>
+    <div id="live-now">${liveNow()}</div>
     <div class="live-grid">
       <section><p class="eyebrow">STANDING QUERIES</p><ol class="watches" id="live-watches">${watchesList()}</ol>${watchForm()}</section>
-      <section><p class="eyebrow">ALERTS</p><ol id="live-alerts" class="alerts">${alertsList()}</ol></section>
     </div></section>`;
 }
-
-const liveClock = () => {
-  const L = S.live, ago = L.lastAt ? Math.round((Date.now() - L.lastAt) / 1000) : null;
-  return `<p class="live-clock mono">${hms(L.t)} <span class="dim">${ds().TZ}</span></p>
-    <p class="mono dim">${L.running ? `INDEXING · up to ${hms(L.t)}` : L.done ? 'REPLAY COMPLETE · INDEX COMPLETE' : L.t > W[0] ? 'PAUSED' : 'READY'}${ago != null ? ` · last detection ${ago}s ago (wall clock)` : ''}</p>`;
+const liveNow = () => {
+  const keys = liveKeys(), recent = ds().DEMO ? [] : ds().events.filter(e => keys.has(e.cameraId)).sort((a, b) => sec(b.time) - sec(a.time)).slice(0, 30);
+  return `<section class="feeds"><p class="eyebrow">CAMERAS</p><ol>${S.ingest.feeds.map(feedItem).join('')}</ol></section>
+    <div class="live-grid">
+      <section><p class="eyebrow">LATEST DETECTIONS</p><ol class="live-feed">${recent.map(e => `<li><button class="thumb" data-act="open" data-id="${e.id}" aria-label="Open ${e.time}">${still(e, { crop: true })}</button>
+        <div><p class="mono">${e.time} ${ds().TZ} · ${esc(cam(e.cameraId).name)}</p><p>${esc(e.label)}</p></div></li>`).join('') || '<li class="dim">Nothing indexed from these cameras yet. The first capture appears here once it is analysed.</li>'}</ol></section>
+      <section><p class="eyebrow">ALERTS</p><ol class="alerts">${alertsList()}</ol></section>
+    </div>`;
 };
-const liveCams = () => cams.map(c => {
-  const st = S.live.streams[c.id] ?? api.streamState(c, S.live.t), last = S.live.feed.find(f => ev(f.id).cameraId === c.id);
-  return `<li class="${st === 'STREAMING' ? '' : 'nosig'}"><b class="mono">${c.code}</b><span>${c.name}</span><span class="mono">${st}</span><span class="mono dim">${last ? ev(last.id).time : '—'}</span></li>`;
-}).join('');
-const liveFeed = () => S.live.feed.map(f => { const e = ev(f.id);
-  return `<li><button class="thumb" data-act="open" data-id="${e.id}" aria-label="Open ${e.time}">${still(e, { crop: true })}</button>
-    <div><p class="mono">${e.time} · ${cam(e.cameraId).code}</p><p>${esc(e.label)}</p><p class="mono dim">watch evaluation ${f.evalMs} ms${f.watches.length ? ' · <span class="warn">ALERT</span>' : ''}</p></div></li>`;
-}).join('') || '<li class="dim">No detections yet in this replay.</li>';
 function watchState(w) {
   const q = api.interpret(w.text, S.memory, null);
   if (q.location && !q.location.ref) return ['NEEDS REFERENT', q.location.term];
-  return [w.status === 'paused' ? 'PAUSED' : api.inSchedule(S.live.t, w) ? 'IN SCHEDULE' : 'OUT OF SCHEDULE'];
+  return [w.status === 'paused' ? 'PAUSED' : api.inSchedule(nowSec(), w) ? 'IN SCHEDULE' : 'OUT OF SCHEDULE'];
 }
 const watchesList = () => S.watches.map(w => { const [st, term] = watchState(w), hits = S.alerts.filter(a => a.watchId === w.id).length;
   return `<li class="watch"><p class="wq">“${esc(w.text)}”</p><dl class="kv">
@@ -1196,37 +1190,16 @@ const watchesList = () => S.watches.map(w => { const [st, term] = watchState(w),
     ${term ? `<button class="txt" data-act="define-term" data-term="${esc(term)}">Define “${esc(term)}”</button>` : ''}<button class="txt danger" data-act="watch-del" data-id="${w.id}">Delete</button></div></li>`;
 }).join('') || '<li class="dim">No standing queries.</li>';
 const watchForm = () => `<form class="watch-form" data-form="watch"><p class="eyebrow">NEW STANDING QUERY</p>
-  <label class="fld">Watch for<input name="text" required maxlength="300" placeholder="Anyone entering the rear entrance"></label>
-  <label class="fld">Cameras<select name="scope"><option value="all">All cameras</option>${cams.map(c => `<option value="${c.id}">${c.code} · ${c.name}</option>`).join('')}</select></label>
-  <label class="fld">Active from<input type="time" name="from" value="20:00" required></label>
-  <label class="fld">Until<input type="time" name="to" value="06:00" required></label>
-  <div class="acts"><button class="btn">Save standing query</button><span class="dim">Applies from the next replay start.</span></div></form>`;
-const alertsList = () => S.alerts.filter(a => ev(a.eventId)).map(a => { const e = ev(a.eventId);
-  return `<li><p class="eyebrow warn">NEW EVENT · ${esc(cam(e.cameraId).name.toUpperCase())}</p><p class="mono">${e.time} ${ds().TZ}</p><p>${esc(e.label)}</p>
-    <p class="mono dim">Watch: “${esc(a.watchText)}”</p><button class="txt" data-act="open" data-id="${e.id}">View evidence</button></li>`;
-}).join('') || '<li class="dim">No alerts.</li>';
-
-function liveUpdate() {
-  for (const [id, fn] of [['live-clock', liveClock], ['live-cams', liveCams], ['live-feed', liveFeed], ['live-alerts', alertsList], ['live-watches', watchesList]]) {
-    const el = document.getElementById(id);
-    if (el) el.innerHTML = fn();
-  }
-}
-
-async function liveStart() {
-  const L = S.live;
-  if (L.done) Object.assign(L, { t: W[0], feed: [], streams: {}, done: false, lastAt: null });
-  L.ac = new AbortController(); L.running = true; render();
-  try {
-    await api.live({ speed: L.speed, from: L.t, signal: L.ac.signal,
-      onTick: d => { L.t = d.t; L.streams = d.streams; liveUpdate(); },
-      onEvent: d => { L.feed.unshift(d); L.feed.length = Math.min(L.feed.length, 30); L.lastAt = Date.now(); liveUpdate(); },
-      onAlert: a => { S.alerts.unshift(a); notify(a); liveUpdate(); } });
-    L.done = true;
-  } catch (e) { if (e.name !== 'AbortError') toast(e.message); }
-  L.running = false;
-  render();
-}
+  <label class="fld">Watch for<input name="text" required maxlength="300" placeholder="A red bus"></label>
+  <label class="fld">Cameras<select name="scope"><option value="all">All cameras</option>${liveCamsNow().map(c => `<option value="${c.id}">${c.code} · ${c.name}</option>`).join('')}</select></label>
+  <label class="fld">Active from<input type="time" name="from" value="00:00" required></label>
+  <label class="fld">Until<input type="time" name="to" value="23:59" required></label>
+  <div class="acts"><button class="btn">Save standing query</button><span class="dim">Checked against every new capture as it is indexed.</span></div></form>`;
+const alertsList = () => { const keys = liveKeys();
+  return S.alerts.filter(a => ev(a.eventId) && keys.has(ev(a.eventId).cameraId)).map(a => { const e = ev(a.eventId);
+    return `<li><p class="eyebrow warn">NEW EVENT · ${esc(cam(e.cameraId).name.toUpperCase())}</p><p class="mono">${e.time} ${ds().TZ}</p><p>${esc(e.label)}</p>
+      <p class="mono dim">Watch: “${esc(a.watchText)}”</p><button class="txt" data-act="open" data-id="${e.id}">View evidence</button></li>`;
+  }).join('') || '<li class="dim">No alerts from the live cameras yet.</li>'; };
 
 function notify(a) {
   const e = ev(a.eventId), t = document.createElement('div');
@@ -1355,7 +1328,7 @@ const commands = () => [
   ...(S.res?.candidates ? [['Compare candidates', () => openLayer({ kind: 'compare', ids: S.res.candidates })]] : []),
   ...(S.context ? [[`Open journey · ${ds().tracks[S.context.track]}`, () => follow(S.context.track)]] : []),
   ['Define a visual referent', () => openResolver({})],
-  ['Open live (simulated replay)', () => go('live')],
+  ['Open live cameras', () => go('live')],
   ...ds().DEMO ? [['Play the opening demonstration', () => playIntro()]] : [],
   [`Turn privacy masking ${S.settings.privacy.faces || S.settings.privacy.plates ? 'off' : 'on'}`, togglePrivacy],
   ['Export investigation', () => exportPackage()],
@@ -1507,8 +1480,6 @@ const ACT = {
     if (!confirm(`Remove “${v.name}”? The uploaded copy, its frames and its index are deleted.`)) return;
     await api.deleteVideo(d.id); S.videos = await api.getVideos(); await loadDataset(); clearSearch(); render();
   },
-  'live-toggle': () => S.live.running ? S.live.ac.abort() : liveStart(),
-  'live-reset': () => { S.live.ac?.abort(); Object.assign(S.live, { t: W[0], feed: [], streams: {}, done: false, lastAt: null }); render(); },
   'watch-toggle': async d => { const w = S.watches.find(x => x.id === d.id); await api.updateWatch(d.id, { status: w.status === 'active' ? 'paused' : 'active' }); S.watches = await api.getWatches(); render(); },
   'watch-del': async d => { if (!confirm('Delete this standing query? Its past alerts stay in the log.')) return; await api.deleteWatch(d.id); S.watches = await api.getWatches(); render(); },
   'define-term': d => openResolver({ name: d.term.replace(/\b\w/g, m => m.toUpperCase()), term: d.term }),
@@ -1581,7 +1552,6 @@ document.addEventListener('input', e => {
 document.addEventListener('change', e => {
   const t = e.target;
   if (t.id === 'speed') P.speed = +t.value;
-  else if (t.id === 'live-speed') S.live.speed = +t.value;
   else if (t.dataset.day !== undefined) switchDay(t.value);
   else if (t.dataset.pickCam) { t.checked ? SRC.sel.set(t.dataset.pickCam, 1) : SRC.sel.delete(t.dataset.pickCam); drawSources(); }
   else if (t.dataset.srcInterval !== undefined) { SRC.interval = +t.value; drawSources(); }

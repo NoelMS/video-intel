@@ -19,7 +19,7 @@ Built for problem statement **HNX26EPS05: Multi-Stream Video Intelligence with C
 | Cross-camera journeys | Sightings of the same entity are chained into a route when their crops look alike (MobileCLIP), share a colour and fit in time. Links are rated *likely same entity / likely continuation / possible continuation*, never stated as fact, and camera coverage gaps are always reported. |
 | Your own footage | Upload recordings (many at once with a `manifest.csv` of cameras and start times), capture public live cameras periodically or continuously, or import the MEVA archive. Indexed on this computer: YOLOX-S detection and tracking at 5 fps, each object named once by a local vision model (Ollama `qwen3-vl:2b`), MobileCLIP embeddings. |
 | Playback with detections | Play any indexed recording with its tracked objects boxed and labelled, or switch to the original picture. H.265 and other codecs browsers cannot play get an H.264 copy during indexing. |
-| Standing queries & alerts | "Notify me if anyone enters the rear entrance after 20:00": checked against every recording as it finishes indexing (uploads, live captures, imports) and during replay. |
+| Standing queries & alerts | "Notify me if anyone enters the rear entrance after 20:00": checked against every recording as it finishes indexing (uploads, live captures, imports). |
 | Privacy | Face and plate masking, retention and expiry limits, operator roles, and an audit trail for every reveal. |
 
 ## Results
@@ -127,7 +127,7 @@ Detailed diagrams (modules, runtime modes, search pipeline, re-ID, alerts, UI, d
 - **Sparse sampling.** At 0.5 fps one person can split into several tracks.
 - **Cross-camera links are description-based** and always shown as *possible*.
 - **No baseline comparison or ablation yet.**
-- **Live mode replays indexed footage.** Live cameras are captured as periodic clips, not a continuous stream, and only while the app is open.
+- **Live is as fresh as the last indexed clip.** Live cameras are captured as periodic clips (or continuous segments for streams), and only while the app is open.
 - **Indexing runs at about 2.5-4x real time** on a 4 GB GPU with the object detector (5 fps; busy scenes take longer), or 2-3x at 0.5 fps without it. Capture pauses while 12 clips wait; big archives take hours.
 - **Masking depends on the model** reporting faces and plates, which it often misses for distant CCTV figures.
 - **No authentication**: the operator role is a setting.

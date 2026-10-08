@@ -184,6 +184,9 @@ async function capture(f) {
       if (+r.headers.get('content-length') > 200e6) throw new Error('Clip larger than 200 MB');
       await pipeline(Readable.fromWeb(r.body), createWriteStream(file));
       const { duration } = await indexer.probe(file);
+      // TfL replaces the video with a ~1 s grey card ("Camera ... in use keeping London moving") while it controls the
+      // camera; real JamCam clips are ~10 s. Nothing to index.
+      if (f.provider === 'tfl' && duration < 2) return { lastModified: r.headers.get('last-modified'), state: 'Camera unavailable: TfL is using it', lastError: null };
       const end = Date.parse(r.headers.get('last-modified')) || Date.now();
       await indexer.addVideoFile(file, { ...meta, start: new Date(end - duration * 1000).toISOString() });
       return { lastModified: r.headers.get('last-modified'), last: new Date().toISOString(), captures: f.captures + 1, state: 'Captured', lastError: null };

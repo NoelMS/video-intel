@@ -148,7 +148,7 @@ open item.
   periodically or continuously (ffmpeg segments, queued as they close); while indexing is behind, segments are
   dropped and shown as coverage gaps.
 - **Standing queries / alerts:** checked against every recording as it finishes indexing (uploads, live captures,
-  imports), and against the replay.
+  imports).
 - **Privacy:** on-premises only (no network calls during analysis). Face and plate masks are generous approximations
   from person and vehicle boxes (there is no face/plate detector). Retention limits, operator roles, and an audit
   trail for every reveal.

@@ -426,13 +426,7 @@ dialog.palette { width: min(640px, 92vw); margin-top: 12vh; padding: 0; }
 .audit li { display: grid; grid-template-columns: 200px 90px 110px 1fr; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 12px; align-items: baseline; }
 
 /* live */
-.live-bar { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: end; gap: 20px; padding-bottom: 24px; border-bottom: 1px solid var(--line); margin-bottom: 36px; }
-.live-clock { font-size: clamp(40px, 6vw, 76px); font-weight: 500; letter-spacing: -.02em; line-height: 1; margin-bottom: 8px; }
-.live-clock .dim { font-size: .35em; }
-.live-bar .acts { margin: 0; }
 .live-grid { display: grid; grid-template-columns: 1fr 1.4fr; gap: 48px; margin-bottom: 56px; }
-.live-cams li { display: grid; grid-template-columns: 64px 1fr 96px 70px; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--line); font-size: 13.5px; align-items: baseline; }
-.live-cams .mono { font-size: 11px; } .live-cams .nosig > span:nth-child(3) { color: var(--warn); }
 .live-feed { max-height: 460px; overflow: auto; }
 .live-feed li { display: grid; grid-template-columns: 120px 1fr; gap: 14px; padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
 .live-feed .mono { font-size: 11.5px; }
@@ -529,7 +523,6 @@ dialog.intro { width: 100vw; height: 100vh; max-width: none; max-height: none; m
   .sys { flex-wrap: wrap; justify-content: flex-end; gap: 6px 12px; }
   .mark { font-size: 13px; }
   .sys-t, .diag-grid table, .lat { display: block; overflow-x: auto; }
-  .live-cams li { grid-template-columns: 56px 1fr 84px; } .live-cams li > :last-child { display: none; }
   .watch-form .fld, .reg .fld { grid-template-columns: 1fr; }
   .board .card-ctl select { max-width: 100%; }
 }
