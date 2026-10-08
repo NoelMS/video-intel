@@ -15,6 +15,7 @@ Built for problem statement **HNX26EPS05: Multi-Stream Video Intelligence with C
 | Clarify once, then remember | An unknown place ("north gate") triggers one question: pick the camera and drag over the area. The place is saved on the server and reused in every later query, across restarts. |
 | Cross-camera journeys | Sightings of the same entity are chained into a route. Links are rated *likely same entity / likely continuation / possible continuation*, never stated as fact, and camera coverage gaps are always reported. |
 | Your own footage | Upload recordings; they are indexed on this computer by a local vision model (Ollama `qwen3-vl:2b` by default) and searched with the same pipeline. |
+| Playback with detections | Play any indexed recording with its tracked objects boxed and labelled, or switch to the original picture. H.265 and other codecs browsers cannot play get an H.264 copy during indexing. |
 | Standing queries & alerts | "Notify me if anyone enters the rear entrance after 20:00" — evaluated against events as a recording is replayed. |
 | Privacy | Face and plate masking, retention and expiry limits, operator roles, and an audit trail for every reveal. |
 
@@ -49,6 +50,18 @@ ES modules need an http origin, so opening `index.html` from disk does not work.
 1. Start the server. On first launch a setup dialog offers to install **ffmpeg**, **Ollama** and a vision model (per-user, checksum-verified, no admin rights).
 2. Switch the header to **My footage** and upload videos on the **Cameras** page with a name, timezone and start time.
 3. Indexing runs in the background (resumes after a restart). On an RTX 3050 4 GB, `qwen3-vl:2b` takes about 5 s per sampled frame at 0.5 fps.
+
+### Where to get footage
+
+| Source | What | Access |
+|---|---|---|
+| [TfL JamCams](https://api.tfl.gov.uk/Place/Type/JamCam) | ~890 London traffic cameras, ~10 s MP4 clips refreshed every few minutes | Free, no key |
+| [Caltrans CCTV](https://cwwp2.dot.ca.gov/documentation/cctv/cctv.htm) | California highway cameras; many with live HLS streams ffmpeg can record | Free, no key |
+| [MEVA](https://mevadata.org) | ~330 h, 29 overlapping and non-overlapping cameras, people and vehicles, annotated | `aws s3 ls --no-sign-request s3://mevadata-public-01/` |
+| [WILDTRACK](https://www.epfl.ch/labs/cvlab/data/data-wildtrack/) | 7 overlapping HD cameras, pedestrians, calibrated | Free download |
+| CamNeT | 5-8 non-overlapping campus cameras with trajectories | Research dataset |
+
+Details and caveats are in [HANDOFF.md](HANDOFF.md#footage-sources-researched).
 
 ## Two data sources
 
@@ -114,3 +127,5 @@ Detailed diagrams (modules, runtime modes, search pipeline, re-ID, alerts, UI, d
 | `e0557da` → `0460457` | One-click launcher, installable app, icon starts the server |
 | `e7b78f4` | Windowless launcher, request guards (Host, Origin, content-type) |
 | `5dfc129` | **Index and search your own recordings with a local vision model** |
+| `720dcbf` | H.265 and other non-browser codecs become playable |
+| `f693ad3` | Playback with tracked boxes, page transitions, new scrollbar |
