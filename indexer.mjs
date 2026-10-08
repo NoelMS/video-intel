@@ -103,7 +103,8 @@ export function backlog() {
 
 function kick() {
   if (current) return;
-  const next = listVideos().find(v => WORKING.includes(v.status));
+  // uploads and imports first; live captures (cameraKey feed-…) resume once those are indexed
+  const waiting = listVideos().filter(v => WORKING.includes(v.status)), next = waiting.find(v => !v.cameraKey?.startsWith('feed-')) ?? waiting[0];
   if (!next) return void backfillEmbeddings().catch(() => {});
   current = { id: next.id, cancelled: false };
   index(next).then(() => { const v = get(next.id); if (v?.status === 'ready') opts.onReady?.(v); })

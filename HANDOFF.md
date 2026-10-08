@@ -351,6 +351,12 @@ ES modules need an http origin. Opening `index.html` from disk will not work.
 
 - **Live shows the live cameras, not a replay**: the replay (`api.live`, `GET /api/live`, the SIMULATED clock, NO SIGNAL stream tiles, speed controls) is removed. The Live page lists the live cameras (`S.feeds`) with their capture state, the latest detections from their recordings (matched by `cameraKey`), alerts from those cameras, and the standing queries. It refreshes only `#live-now` on each poll so the watch form keeps its input. With no live cameras it says so and links to Cameras. Alerts still come from the server's `onReady` check. A TfL camera that TfL is controlling serves a 1 s grey card ("Camera ... in use keeping London moving") instead of a ~10 s clip; it is not indexed and shows "Camera unavailable: TfL is using it".
 
+- **Faster live capture, Start capture, upload priority**:
+  - Default capture interval is 1 min (minimum 1, was 2; default was 10).
+  - **Fast capture** (`sources.fastWhy`) runs while a camera's **Start capture** is on, or while an active standing query for that camera (or all cameras) is in its hours. A clip camera (TfL) is then polled every 30 s; an unchanged clip is a free 304. A stream records continuously in `clipSec` segments. When it ends, the camera returns to its schedule.
+  - A standing query can name a live camera before its first clip is indexed.
+  - The indexer takes uploads and imports before live captures, then resumes the live clips.
+
 ## Footage sources (researched)
 
 Live feeds (for the live-ingest stretch goal; all free, check each licence before redistributing):

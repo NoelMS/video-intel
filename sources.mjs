@@ -10,6 +10,7 @@ import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
 import * as setup from './setup.mjs';
 import * as indexer from './indexer.mjs';
+import { inSchedule } from './api.js';
 
 let load = () => [], save = () => {};
 export const useStorage = (l, s) => { load = l; save = s; };
@@ -83,13 +84,23 @@ export function addFeeds(items) {
   save('vi.feeds', [...listFeeds(), ...added]);
   return added;
 }
-export const updateFeed = (id, patch) => save('vi.feeds', listFeeds().map(f => f.id === id ? { ...f, ...patch, ...(patch.active ? { next: Date.now() } : {}) } : f));
+export const updateFeed = (id, patch) => save('vi.feeds', listFeeds().map(f => f.id === id ? { ...f, ...patch, ...(patch.active || patch.fast ? { next: Date.now() } : {}) } : f));
+
+// Fast capture: a clip camera is polled every FAST_SEC (an unchanged TfL clip is a free 304) and a stream records
+// continuously. On while "Start capture" is on, or while an active standing query covering the camera is in its hours
+// (watch hours are this computer's clock, like the dataset's).
+const FAST_SEC = 30;
+const nowSec = () => { const d = new Date(); return d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds(); };
+export const fastWhy = f => f.fast ? 'started manually'
+  : load('vi.watches', []).some(w => w.status === 'active' && (w.scope === 'all' || w.scope === f.cameraKey) && inSchedule(nowSec(), w)) ? 'standing query hours' : null;
+const recording = f => f.active && f.kind === 'stream' && (f.continuous || !!fastWhy(f));
+const due = f => f.next <= Date.now() || (fastWhy(f) && f.next > Date.now() + FAST_SEC * 1e3);
 export const removeFeed = id => save('vi.feeds', listFeeds().filter(f => f.id !== id));   // clips already indexed stay
 
 export const MAX_BACKLOG = 12;   // captures pause while this many clips wait for the model, rather than queueing forever
 const capturing = new Set();
 async function tick() {
-  for (const f of listFeeds().filter(f => f.active && !f.continuous && f.next <= Date.now() && !capturing.has(f.id))) {
+  for (const f of listFeeds().filter(f => f.active && !recording(f) && due(f) && !capturing.has(f.id))) {
     if (indexer.backlog().clips >= MAX_BACKLOG) { putFeed({ ...f, state: 'Paused while the indexing backlog clears', next: Date.now() + 60e3 }); continue; }
     captureFeed(f);
   }
@@ -99,7 +110,7 @@ function captureFeed(f, clipSec = null) {
   capturing.add(f.id);
   putFeed({ ...f, capturing: true, state: 'Capturing…' });
   return capture(clipSec ? { ...f, clipSec } : f).catch(e => ({ lastError: e.message, state: 'Capture failed; retrying next interval' }))
-    .then(patch => { const cur = listFeeds().find(x => x.id === f.id); if (cur) putFeed({ ...cur, ...patch, capturing: false, next: Date.now() + cur.intervalMin * 60e3 }); })
+    .then(patch => { const cur = listFeeds().find(x => x.id === f.id); if (cur) putFeed({ ...cur, ...patch, capturing: false, next: Date.now() + (fastWhy(cur) ? FAST_SEC * 1e3 : cur.intervalMin * 60e3) }); })
     .finally(() => capturing.delete(f.id));
 }
 // "Capture now": also on a paused camera, and past the backlog limit, since someone asked for it. clipSec sets this
@@ -121,7 +132,7 @@ const recorders = new Map();   // feed id -> { proc, dir, dropped, queued, err }
 function recordContinuously() {
   const feeds = listFeeds();
   for (const f of feeds) {
-    const on = f.active && f.continuous && f.kind === 'stream', r = recorders.get(f.id);
+    const on = recording(f), r = recorders.get(f.id);
     if (on && !r) startRecorder(f);
     else if (!on && r) stopRecorder(f.id);
     else if (r) queueSegments(f, r);
@@ -142,7 +153,7 @@ function startRecorder(f) {
     if (recorders.get(f.id) !== r) return;
     recorders.delete(f.id);
     const cur = listFeeds().find(x => x.id === f.id);
-    if (cur?.active && cur.continuous) putFeed({ ...cur, state: 'Stream dropped; reconnecting', lastError: r.err.trim().split('\n').at(-1) || null });
+    if (cur && recording(cur)) putFeed({ ...cur, state: 'Stream dropped; reconnecting', lastError: r.err.trim().split('\n').at(-1) || null });
   });
   putFeed({ ...f, state: `Recording continuously in ${f.clipSec} s segments` });
 }

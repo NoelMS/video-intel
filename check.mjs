@@ -262,4 +262,16 @@ if (setupMod.detectorOk() && setupMod.ffmpegPath()) {
 } else console.log('(object detector not installed: skipped its check)');
 rmSync(storeDir, { recursive: true, force: true });
 
+// fast capture: manual "Start capture", or an active standing query for this camera (or all) inside its hours
+{
+  const sources = await import('./sources.mjs'), mem = new Map(), cam = { cameraKey: 'feed-a' };
+  sources.useStorage((k, d) => mem.get(k) ?? d, (k, v) => mem.set(k, v));
+  const w = (scope, from, to, status = 'active') => ({ scope, from, to, status });
+  assert.equal(sources.fastWhy({ ...cam, fast: true }), 'started manually');
+  mem.set('vi.watches', [w('feed-b', '00:00', '23:59'), w('all', '00:00', '23:59', 'paused')]);
+  assert.equal(sources.fastWhy(cam), null, 'other camera / paused watch');
+  mem.set('vi.watches', [w('feed-a', '00:00', '23:59')]);
+  assert.equal(sources.fastWhy(cam), 'standing query hours');
+}
+
 console.log('all flows ok');

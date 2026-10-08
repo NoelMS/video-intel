@@ -909,7 +909,7 @@ function pollVideos() {
 // ---------- public cameras and archives (sources.mjs) ----------
 // Live cameras capture a clip every few minutes while the app is open; archives download clips. Everything is
 // indexed by the same local model, so the backlog line says how long the queue will take at the measured speed.
-const SRC = { tab: 'tfl', q: '', sel: new Map(), district: 7, list: [], loading: false, interval: 10, clipSec: 30, mevaPrefix: 'drops-123-r13/', meva: null, mevaSel: new Set() };
+const SRC = { tab: 'tfl', q: '', sel: new Map(), district: 7, list: [], loading: false, interval: 1, clipSec: 30, mevaPrefix: 'drops-123-r13/', meva: null, mevaSel: new Set() };
 const TABS = [['tfl', 'London'], ['caltrans', 'California'], ['stream', 'Stream URL'], ['meva', 'MEVA archive'], ['urls', 'Video URLs']];
 const hmsDur = s => s >= 3600 ? `${Math.floor(s / 3600)} h ${Math.round(s % 3600 / 60)} min` : s >= 60 ? `${Math.round(s / 60)} min` : `${Math.round(s)} s`;
 const estimate = seconds => { const spf = S.ingest?.backlog?.secPerFrame; return spf ? hmsDur(seconds * S.settings.pipeline.sampling * spf) : null; };
@@ -938,7 +938,7 @@ function sourcesLayer() {
     <div class="srcbody">${{ tfl: pickCams, caltrans: pickCams, stream: streamForm, meva: mevaBrowser, urls: urlsForm }[tab]()}</div>`;
 }
 
-const intervalPick = () => `<label class="mono">Capture every <select data-src-interval>${[2, 5, 10, 15, 30, 60].map(m => `<option value="${m}" ${SRC.interval === m ? 'selected' : ''}>${m} min</option>`).join('')}</select></label>`;
+const intervalPick = () => `<label class="mono">Capture every <select data-src-interval>${[1, 2, 5, 10, 15, 30, 60].map(m => `<option value="${m}" ${SRC.interval === m ? 'selected' : ''}>${m} min</option>`).join('')}</select></label>`;
 function pickCams() {
   const tfl = SRC.tab === 'tfl', q = SRC.q.toLowerCase(), have = new Set((S.ingest?.feeds || []).map(f => f.url));
   const shown = SRC.list.filter(c => !q || `${c.name} ${c.view}`.toLowerCase().includes(q)).slice(0, 60);
@@ -970,7 +970,7 @@ function captureLayer({ id }) {
       ${stream ? `<label class="fld">Record for<span class="row"><input type="number" name="len" min="5" max="300" step="1" value="${f.clipSec}" required> seconds</span><span class="dim">5 seconds to 5 minutes. Longer clips take longer to index.</span></label>`
         : `<p class="dim">This camera publishes a short clip (about 10 seconds) every minute or so; Capture now fetches the newest one.</p>`}
       <fieldset><legend class="eyebrow">SCHEDULE</legend>
-        <label class="fld">Capture every<span class="row"><input type="number" name="every" min="2" max="1440" step="1" value="${f.intervalMin}" required> minutes</span></label>
+        <label class="fld">Capture every<span class="row"><input type="number" name="every" min="1" max="1440" step="1" value="${f.intervalMin}" required> minutes</span></label>
         ${stream ? `<label class="opt"><input type="checkbox" name="keep" checked> <span>Record this long on every scheduled capture too (now ${f.clipSec} s)</span></label>` : ''}
         ${stream ? `<label class="opt"><input type="checkbox" name="continuous" ${f.continuous ? 'checked' : ''}> <span>Record continuously instead, in segments of this length (indexing keeps up as far as this computer allows; the rest show as gaps)</span></label>` : ''}
       </fieldset>
@@ -1054,9 +1054,9 @@ const FEED_KIND = { tfl: 'TfL JamCam · 10 s clips', caltrans: 'Caltrans live st
 const feedImage = f => f.image || (S.videos.filter(v => v.cameraKey === f.cameraKey && v.status === 'ready').at(-1)?.id ?? null);
 const feedItem = f => { const img = feedImage(f); return `<li class="feed ${f.active ? '' : 'paused'}">
   ${img ? `<img loading="lazy" src="${esc(f.image || `api/videos/${img}/frames/1`)}" alt="">` : '<span class="noimg"></span>'}
-  <div><p class="cn">${esc(f.name)}</p><p class="mono dim">${esc(FEED_KIND[f.provider] || 'Stream')} · ${f.continuous ? `continuous, ${f.clipSec} s segments` : `every ${f.intervalMin} min${f.kind === 'stream' ? ` for ${f.clipSec} s` : ''}`} · ${f.captures} capture${f.captures === 1 ? '' : 's'}</p>
+  <div><p class="cn">${esc(f.name)}</p><p class="mono dim">${esc(FEED_KIND[f.provider] || 'Stream')} · ${f.active && f.fastWhy ? `<b>fast capture</b> (${f.fastWhy}): ${f.kind === 'stream' ? `continuous, ${f.clipSec} s segments` : 'every 30 s'}` : f.continuous ? `continuous, ${f.clipSec} s segments` : `every ${f.intervalMin} min${f.kind === 'stream' ? ` for ${f.clipSec} s` : ''}`} · ${f.captures} capture${f.captures === 1 ? '' : 's'}</p>
     <p class="mono ${f.lastError ? 'warn' : 'dim'}">${f.active ? esc(f.state) : 'Paused'}${f.last ? ` · last ${new Date(f.last).toLocaleTimeString('en-GB')}` : ''}${f.lastError ? ` · ${esc(f.lastError)}` : ''}</p></div>
-  <div class="acts"><button class="txt" data-act="feed-capture" data-id="${f.id}" ${f.capturing ? 'disabled' : ''}>${f.capturing ? 'Capturing…' : 'Capture now'}</button><button class="txt" data-act="feed-toggle" data-id="${f.id}" data-on="${f.active ? 0 : 1}">${f.active ? 'Pause' : 'Resume'}</button><button class="txt danger" data-act="feed-del" data-id="${f.id}">Remove</button></div></li>`; };
+  <div class="acts"><button class="txt" data-act="feed-capture" data-id="${f.id}" ${f.capturing ? 'disabled' : ''}>${f.capturing ? 'Capturing…' : 'Capture now'}</button><button class="txt" data-act="feed-fast" data-id="${f.id}" data-on="${f.fast ? 0 : 1}" title="Capture as often as the camera allows until stopped">${f.fast ? 'Stop capture' : 'Start capture'}</button><button class="txt" data-act="feed-toggle" data-id="${f.id}" data-on="${f.active ? 0 : 1}">${f.active ? 'Pause' : 'Resume'}</button><button class="txt danger" data-act="feed-del" data-id="${f.id}">Remove</button></div></li>`; };
 function ingestPanel() {
   const ig = S.ingest; if (!ig) return '';
   const b = ig.backlog, active = ig.imports.filter(i => ['queued', 'downloading'].includes(i.state)), failed = ig.imports.filter(i => i.state === 'failed');
@@ -1153,7 +1153,6 @@ async function switchSource(src) {
 // Live is the cameras being captured now (Cameras → Add live cameras): no uploads, no archives, no replay. Each new
 // capture is indexed and checked against the standing queries on the server; this page shows what came in.
 const liveKeys = () => new Set((S.ingest?.feeds || []).map(f => f.cameraKey));
-const liveCamsNow = () => cams.filter(c => liveKeys().has(c.id));
 const nowSec = () => { const d = new Date(); return d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds(); };
 function liveView() {
   const feeds = S.ingest?.feeds || [];
@@ -1191,7 +1190,7 @@ const watchesList = () => S.watches.map(w => { const [st, term] = watchState(w),
 }).join('') || '<li class="dim">No standing queries.</li>';
 const watchForm = () => `<form class="watch-form" data-form="watch"><p class="eyebrow">NEW STANDING QUERY</p>
   <label class="fld">Watch for<input name="text" required maxlength="300" placeholder="A red bus"></label>
-  <label class="fld">Cameras<select name="scope"><option value="all">All cameras</option>${liveCamsNow().map(c => `<option value="${c.id}">${c.code} · ${c.name}</option>`).join('')}</select></label>
+  <label class="fld">Cameras<select name="scope"><option value="all">All cameras</option>${(S.ingest?.feeds || []).map(f => `<option value="${esc(f.cameraKey)}">${esc(f.name)}</option>`).join('')}</select></label>
   <label class="fld">Active from<input type="time" name="from" value="00:00" required></label>
   <label class="fld">Until<input type="time" name="to" value="23:59" required></label>
   <div class="acts"><button class="btn">Save standing query</button><span class="dim">Checked against every new capture as it is indexed.</span></div></form>`;
@@ -1460,6 +1459,7 @@ const ACT = {
   'meva-go': d => { SRC.mevaPrefix = d.prefix; loadSourceList(); },
   'meva-import': () => importMeva(),
   'feed-capture': d => openLayer({ kind: 'capture', id: d.id }),
+  'feed-fast': async d => { S.ingest = await api.updateFeed(d.id, d.on === '1' ? { fast: true, active: true } : { fast: false }); render(); pollVideos(); },
   'feed-toggle': async d => { S.ingest = await api.updateFeed(d.id, { active: d.on === '1' }); render(); pollVideos(); },
   'feed-del': async d => { if (!confirm('Stop capturing this camera? Clips already indexed stay.')) return; S.ingest = await api.removeFeed(d.id); render(); },
   'imports-clear': async () => { S.ingest = await api.clearImports(); render(); },

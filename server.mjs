@@ -81,7 +81,7 @@ const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
 function validWatch(b, partial = false) {
   const out = {};
   if (!partial || 'text' in b) { if (typeof b.text !== 'string' || !b.text.trim() || b.text.length > 300) bad('text must be 1-300 characters'); out.text = b.text.trim(); }
-  if (!partial || 'scope' in b) { if (b.scope !== 'all' && !api.camera(b.scope)) bad('unknown scope'); out.scope = b.scope; }
+  if (!partial || 'scope' in b) { if (b.scope !== 'all' && !api.camera(b.scope) && !sources.listFeeds().some(f => f.cameraKey === b.scope)) bad('unknown scope'); out.scope = b.scope; }
   for (const k of ['from', 'to']) if (!partial || k in b) { if (!HHMM.test(b[k])) bad(`${k} must be HH:MM`); out[k] = b[k]; }
   if ('status' in b) { if (!['active', 'paused'].includes(b.status)) bad('status must be active or paused'); out.status = b.status; }
   return out;
@@ -143,7 +143,7 @@ function validFeeds(b) {
     if (!/^(https?|rtsp):\/\/\S+$/.test(i.url || '') || i.url.length > 500) bad('url must be http(s) or rtsp');
     if (!['clip', 'stream'].includes(i.kind)) bad('kind must be clip or stream');
     const intervalMin = +i.intervalMin, clipSec = +(i.clipSec ?? 30);
-    if (!(intervalMin >= 2 && intervalMin <= 1440)) bad('intervalMin must be 2-1440');
+    if (!(intervalMin >= 1 && intervalMin <= 1440)) bad('intervalMin must be 1-1440');
     if (!(clipSec >= 5 && clipSec <= 300)) bad('clipSec must be 5-300');
     return { name: str(i.name, 80, 'name'), location: str(i.location || 'Unspecified', 120, 'location'), tz: validTz(i.tz), url: i.url, kind: i.kind,
       intervalMin, clipSec, continuous: i.continuous === true && i.kind === 'stream', provider: ['tfl', 'caltrans', 'url'].includes(i.provider) ? i.provider : 'url', image: /^https:\/\/\S+$/.test(i.image || '') ? i.image : null };
@@ -170,7 +170,7 @@ function validImports(b) {
       cameraKey: 'url-' + createHash('sha1').update(b.camera ? cam : u).digest('hex').slice(0, 12) };
   });
 }
-const ingest = () => ({ feeds: sources.listFeeds(), imports: sources.listImports(), backlog: indexer.backlog(), maxBacklog: sources.MAX_BACKLOG, attribution: sources.ATTRIBUTION });
+const ingest = () => ({ feeds: sources.listFeeds().map(f => ({ ...f, fastWhy: sources.fastWhy(f) })), imports: sources.listImports(), backlog: indexer.backlog(), maxBacklog: sources.MAX_BACKLOG, attribution: sources.ATTRIBUTION });
 
 // The active dataset follows settings.source: the demo, or "My footage" rebuilt whenever indexed videos change.
 let mine = null, mineKey = null;
@@ -257,7 +257,8 @@ const routes = [
   ['PUT', /^feeds\/([\w-]+)$/, async (req, [id]) => {
     const b = await body(req), patch = {};
     if ('active' in b) { if (typeof b.active !== 'boolean') bad('active must be boolean'); patch.active = b.active; patch.state = b.active ? 'Resumed' : 'Paused'; }
-    if ('intervalMin' in b) { if (!(+b.intervalMin >= 2 && +b.intervalMin <= 1440)) bad('intervalMin must be 2-1440'); patch.intervalMin = +b.intervalMin; }
+    if ('intervalMin' in b) { if (!(+b.intervalMin >= 1 && +b.intervalMin <= 1440)) bad('intervalMin must be 1-1440'); patch.intervalMin = +b.intervalMin; }
+    if ('fast' in b) { if (typeof b.fast !== 'boolean') bad('fast must be boolean'); patch.fast = b.fast; }
     if ('clipSec' in b) patch.clipSec = validClipSec(b.clipSec);
     if ('continuous' in b) { if (typeof b.continuous !== 'boolean') bad('continuous must be boolean'); patch.continuous = b.continuous; }
     sources.updateFeed(id, patch); return ingest();
