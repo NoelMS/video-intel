@@ -42,6 +42,7 @@ export async function hasModel(name) {
 // windows flashed while one model loaded, and the custom models folder was lost ("model not found").
 // Fallback without the tray app: a non-detached serve shares this server's hidden console, so its runners stay hidden.
 export async function ensureOllama() {
+  if (stopOrphanServe()) await new Promise(r => setTimeout(r, 2000));   // the tray app restarts its own serve in ~1 s
   if (await ollamaVersion()) return true;
   const exe = ollamaExe();
   if (!exe) return false;
@@ -50,6 +51,19 @@ export async function ensureOllama() {
   else spawn(exe, ['serve'], { stdio: 'ignore', windowsHide: true });
   for (let i = 0; i < 40; i++) { await new Promise(r => setTimeout(r, 500)); if (await ollamaVersion()) return true; }
   return false;
+}
+
+// Earlier versions started a detached `ollama serve` that outlived us. It keeps port 11434, so the tray app's own
+// serve crash-loops and runners flash consoles again. Stop it once per run, but only if its parent is gone: a serve
+// someone started from a terminal still has a living parent and is left alone.
+let swept = process.platform !== 'win32';
+function stopOrphanServe() {
+  if (swept) return false;
+  swept = true;
+  const ps = `$c = Get-NetTCPConnection -LocalPort 11434 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($c) { $p = Get-CimInstance Win32_Process -Filter "ProcessId=$($c.OwningProcess)"
+  if ($p.Name -eq 'ollama.exe' -and $p.CommandLine -match ' serve' -and -not (Get-Process -Id $p.ParentProcessId -ErrorAction SilentlyContinue)) { Stop-Process -Id $p.ProcessId -Force; 'stopped' } }`;
+  return /stopped/.test(spawnSync('powershell', ['-NoProfile', '-Command', ps], { encoding: 'utf8', windowsHide: true }).stdout || '');
 }
 
 export async function status(model) {
