@@ -673,7 +673,7 @@ let setupPoll = null;
 const SETUP_PARTS = [
   ['ffmpeg', 'ffmpeg', 'Decodes your recordings, including H.265 CCTV files. About 100 MB.'],
   ['ollama', 'Ollama', 'Runs the vision model on this computer. About 1 GB.'],
-  ['detector', 'Object detector', 'Finds and follows people and vehicles in every frame, so the vision model only describes each one once. Indexing becomes several times faster. YOLOX-S on ONNX Runtime, about 150 MB.'],
+  ['detector', 'Object detector and image search', 'Finds and follows people and vehicles in every frame, so the vision model only describes each one once, and lets you search for anything you can describe, not just fixed labels. YOLOX-S and MobileCLIP-S0 on ONNX Runtime, about 240 MB.'],
 ];
 
 async function openSetup() {
@@ -777,11 +777,11 @@ function playIntro() {
 // The server stores each upload; ffmpeg samples frames and the local vision model describes them (indexer.mjs).
 const TZS = ['Asia/Kolkata', 'UTC', 'Europe/London', 'America/New_York', 'Asia/Singapore', 'Australia/Sydney'];
 const mb = n => n < 1048576 ? Math.ceil(n / 1024) + ' KB' : (n / 1048576).toFixed(n < 1e8 ? 1 : 0) + ' MB';
-const WORKING = ['queued', 'transcoding', 'extracting', 'analyzing', 'naming'];
-const VSTATE = { queued: 'Queued', transcoding: 'Making a browser-playable copy', extracting: 'Extracting frames', analyzing: 'Analysing frames', naming: 'Describing each tracked object', ready: 'Indexed', failed: 'Failed' };
+const WORKING = ['queued', 'transcoding', 'extracting', 'analyzing', 'naming', 'embedding'];
+const VSTATE = { queued: 'Queued', transcoding: 'Making a browser-playable copy', extracting: 'Extracting frames', analyzing: 'Analysing frames', naming: 'Describing each tracked object', embedding: 'Building the image search index', ready: 'Indexed', failed: 'Failed' };
 const localNow = () => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 16); };
 let videoPoll = null;
-const counted = (v, p) => v.status === 'analyzing' ? `${p.done} / ${p.total} frames` : v.status === 'naming' ? `${p.done} / ${p.total} objects` : `${dur(p.done)} of ${dur(p.total)}`;
+const counted = (v, p) => v.status === 'embedding' ? 'a few seconds' : v.status === 'analyzing' ? `${p.done} / ${p.total} frames` : v.status === 'naming' ? `${p.done} / ${p.total} objects` : `${dur(p.done)} of ${dur(p.total)}`;
 
 function registerLayer() {
   const s = S.setup, ready = s && s.ffmpeg.ok && s.ollama.installed && s.model.ok;
@@ -1254,7 +1254,7 @@ function systemView() {
   const covered = c => c.coverage.reduce((n, [a, b]) => n + Math.min(sec(b), W[1]) - Math.max(sec(a), W[0]), 0) / (W[1] - W[0]);
   const avail = cams.filter(c => c.status !== 'offline'), p = S.settings.pipeline;
   return `<section class="page"><header class="page-h"><p class="eyebrow">SYSTEM</p><h1>How the index stands.</h1>
-    <p class="lede">Search quality depends on what was indexed. Values are computed from the ${mode === 'server' ? 'server' : 'in-browser'} demo index.</p></header>
+    <p class="lede">Search quality depends on what was indexed. Values are computed from ${ds().DEMO ? `the ${mode === 'server' ? 'server' : 'in-browser'} demo index` : 'your indexed recordings'}.</p></header>
     <section class="health" aria-label="System health"><dl class="kv">
       <div><dt>Cameras</dt><dd>${avail.length} / ${cams.length} available</dd></div>
       <div><dt>Index</dt><dd>Complete for available footage</dd></div>
@@ -1265,7 +1265,7 @@ function systemView() {
       <table class="sys-t"><thead><tr><th scope="col">Camera</th><th scope="col">Coverage</th><th scope="col">Frames</th><th scope="col">Embeddings</th><th scope="col">Events</th><th scope="col">Clock offset</th><th scope="col">Failed segments</th></tr></thead>
       <tbody>${cams.map(c => { const v = c.status === 'offline' ? 0 : covered(c), pct = Math.round(v * 100) + '%', holes = api.coverageGaps([{ ...c, status: 'ready' }], W);
         return `<tr><th scope="row" class="mono">${c.code} <span class="dim">${c.name}</span></th><td><span class="meter" role="img" aria-label="${pct} covered"><i style="width:${v * 100}%"></i></span> <span class="mono">${pct}</span></td>
-          <td class="mono">${pct}</td><td class="mono">${pct}</td><td class="mono">${allEvents.filter(e => e.cameraId === c.id).length}</td>
+          <td class="mono">${c.real ? c.frames.length : pct}</td><td class="mono">${!c.real ? pct : c.embedded ? `${c.embedded.objects} objects · ${c.embedded.frames} frames` : 'none'}</td><td class="mono">${allEvents.filter(e => e.cameraId === c.id).length}</td>
           <td class="mono">${fmtSync(c.sync)}${c.sync != null && Math.abs(c.sync) > 1 ? ' <span class="warn">DRIFT</span>' : ''}</td>
           <td class="mono">${c.status === 'offline' ? 'camera offline' : holes.map(g => hm(g.from) + '–' + hm(g.to)).join(', ') || 'none'}</td></tr>`; }).join('')}</tbody></table></section>
     <form class="settings" data-form="settings">

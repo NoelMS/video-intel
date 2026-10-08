@@ -294,6 +294,16 @@ ES modules need an http origin. Opening `index.html` from disk will not work.
     - Browser checks now run headless the same way, with no visible window.
   - **Cursor**: `main`, all branches and GitHub's contributors API are clean. The repo page's contributor sidebar (`/contributors_list`) still lists `@cursoragent`, from cached co-author data and/or `refs/pull/1/head` (PR #1's frozen commits, which GitHub does not let owners rewrite). Removing it needs GitHub Support (ask them to remove the PR #1 ref and cached views) or recreating the repository.
 
+- **Problem-statement gap plan, phases 0-2** (plan: baseline, open-vocab, evaluation, write-up, then bonus items):
+  - **README screenshots in dark mode**: recaptured headlessly with `colorScheme: 'dark'`.
+  - **Image embeddings** (`embed.mjs`): MobileCLIP-S0 (image 46 MB fp32, text 43 MB int8) on the detector's ONNX Runtime (DirectML for images, CPU for text). The CLIP byte-level BPE tokenizer is in plain JS and matches CLIP's ids. Inputs: 256x256 RGB, pixels 0-1, no mean/std.
+    - Setup now installs only missing detector items; existing installs get one prompt (`vision.imageSearchOffered`).
+    - `embedVideo` (indexer.mjs) stores, per recording, `embeddings.bin` (Float32, 512-d) + `embeddings.json` rows: one per track (largest sighting, square crop with context) and one centre-crop frame per second. About 20 ms each.
+    - Older detector-indexed recordings are backfilled while the queue is idle (3 test clips in 13 s). `storedTracks` keeps `tk`, and event ids use it, so embeddings are keyed `${vid}_${tk}`.
+    - The System page's Frames and Embeddings columns show real counts for your footage.
+  - **Baseline** (`baseline.mjs`, `POST /api/baseline/search`): CLIP frame retrieval over the same footage (1 frame/s, cosine with the query text, top-k frames -> camera + time). No detection, tracking, labels, memory or verification. `phrase()` strips question words, time phrases and remembered place names ("did a red car pass the main gate after 9:40?" -> "a photo of a red car"); both paths use it.
+  - **Open-vocabulary ranking** (`openVocab` in api.js): with embeddings, an object's query similarity, as a percentile among the searched objects, is blended with the share of the query's attribute words in its label (`OPEN_VOCAB.imageWeight` 0.5). It passes if all attribute words match or the blend is >= `OPEN_VOCAB.pass` (0.75). The server computes similarities (`objectSimilarities`) and passes `sim` into `search()`. The demo is unchanged. Weights are to be tuned on the dev split in phase 4.
+
 ## Footage sources (researched)
 
 Live feeds (for the live-ingest stretch goal; all free, check each licence before redistributing):

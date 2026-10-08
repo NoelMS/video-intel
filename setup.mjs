@@ -19,15 +19,20 @@ export const MODELS = {
 const FFMPEG_ZIP = 'https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip';
 const OLLAMA_SETUP = 'https://github.com/ollama/ollama/releases/latest/download/OllamaSetup.exe';
 const OLLAMA_SUMS = 'https://github.com/ollama/ollama/releases/latest/download/sha256sum.txt';
-// Object detector: pinned versions and hashes (the npm ones match the registry's own sha512 integrity).
-// ONNX Runtime is MIT (Microsoft), YOLOX is Apache-2.0 (Megvii).
+// Object detector and image-search model: pinned versions and hashes (the npm ones match the registry's own sha512
+// integrity; the Hugging Face ones are the files' LFS SHA-256). ONNX Runtime is MIT (Microsoft), YOLOX Apache-2.0
+// (Megvii), MobileCLIP-S0 Apple's sample-code licence (weights) via Xenova's ONNX export.
 export const DETECTOR_DIR = join(RT, 'detector');
 const DETECTOR = [
   { pkg: 'onnxruntime-node', url: 'https://registry.npmjs.org/onnxruntime-node/-/onnxruntime-node-1.30.0.tgz', sha256: '6e3390d6b783e7be946fad629292799da28d0b42f84856e50d2c1b0383291e75', label: 'ONNX Runtime (114 MB)' },
   { pkg: 'onnxruntime-common', url: 'https://registry.npmjs.org/onnxruntime-common/-/onnxruntime-common-1.30.0.tgz', sha256: '7906c439e0d3e0f4048caa23b64cdfadc0f455c377f579ce1ab2a4b778f07d5f', label: 'ONNX Runtime' },
   { file: 'yolox_s.onnx', url: 'https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_s.onnx', sha256: 'c5c2d13e59ae883e6af3b45daea64af4833a4951c92d116ec270d9ddbe998063', label: 'YOLOX-S detector (36 MB)' },
+  { file: 'clip_vision.onnx', url: 'https://huggingface.co/Xenova/mobileclip_s0/resolve/main/onnx/vision_model.onnx', sha256: '17d3c037b1d488c10c50e09f6009ea5a198caef4e0e8f4ea5617b7cb2d067ac0', label: 'MobileCLIP image model (46 MB)' },
+  { file: 'clip_text.onnx', url: 'https://huggingface.co/Xenova/mobileclip_s0/resolve/main/onnx/text_model_quantized.onnx', sha256: 'b8557b10e5c23a0126c6d2e6eba48d240484979007917d128953b31618a04211', label: 'MobileCLIP text model (43 MB)' },
+  { file: 'clip_tokenizer.json', url: 'https://huggingface.co/Xenova/mobileclip_s0/resolve/main/tokenizer.json', sha256: '72ed5c96db5729294468543e4bc75fce14ca63f58e37300290189ba1c1e52b85', label: 'MobileCLIP tokenizer' },
 ];
-export const detectorOk = () => existsSync(join(DETECTOR_DIR, 'yolox_s.onnx')) && existsSync(join(DETECTOR_DIR, 'node_modules', 'onnxruntime-node', 'package.json'));
+const have = d => existsSync(d.pkg ? join(DETECTOR_DIR, 'node_modules', d.pkg, 'package.json') : join(DETECTOR_DIR, d.file));
+export const detectorOk = () => DETECTOR.every(have);
 
 const which = name => spawnSync('where', [name], { encoding: 'utf8', windowsHide: true }).stdout?.split(/\r?\n/).find(Boolean) || null;
 const firstExisting = list => list.find(p => p && existsSync(p)) || null;
@@ -169,29 +174,32 @@ async function pullModel(name, step) {
   if (!await hasModel(name)) throw new Error(`${name} did not finish downloading.`);
 }
 
-// Into a temporary folder first, so a failed install never leaves a half-working detector behind.
+// Only what is missing is fetched (an install from before the image-search model gets just those files). Each item is
+// downloaded and verified in a temporary folder, then moved into place whole, so a failure never leaves half a file.
 async function installDetector(step) {
   const tmp = DETECTOR_DIR + '-tmp', tar = join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe');
-  rmSync(tmp, { recursive: true, force: true }); mkdirSync(tmp, { recursive: true });
+  rmSync(tmp, { recursive: true, force: true }); mkdirSync(join(DETECTOR_DIR, 'node_modules'), { recursive: true });
   try {
-    for (const d of DETECTOR) {
+    for (const d of DETECTOR.filter(d => !have(d))) {
+      mkdirSync(tmp, { recursive: true });
       step.label = `Downloading ${d.label}`;
       const file = join(tmp, d.file || d.pkg + '.tgz');
       expectSum(await download(d.url, file, step), d.sha256, d.label);
-      if (!d.pkg) continue;
+      if (!d.pkg) { renameSync(file, join(DETECTOR_DIR, d.file)); continue; }
       step.label = `Unpacking ${d.label}`;
-      const dir = join(tmp, 'node_modules', d.pkg);
-      mkdirSync(dir, { recursive: true });
+      const dir = join(tmp, d.pkg);
+      mkdirSync(dir);
       await run(tar, ['-xzf', file, '-C', dir, '--strip-components=1']);
-      rmSync(file);
+      // keep this platform's runtime only (the package ships every platform's: 290 MB -> ~70 MB)
+      const bins = join(dir, 'bin', 'napi-v6');
+      if (existsSync(bins)) for (const os of readdirSync(bins)) {
+        for (const arch of readdirSync(join(bins, os))) if (os !== process.platform || arch !== process.arch) rmSync(join(bins, os, arch), { recursive: true, force: true });
+        if (!readdirSync(join(bins, os)).length) rmSync(join(bins, os), { recursive: true });
+      }
+      rmSync(join(DETECTOR_DIR, 'node_modules', d.pkg), { recursive: true, force: true });
+      renameSync(dir, join(DETECTOR_DIR, 'node_modules', d.pkg));
+      rmSync(tmp, { recursive: true, force: true });
     }
-    // keep this platform's runtime only (the package ships every platform's: 290 MB -> ~70 MB)
-    const bins = join(tmp, 'node_modules', 'onnxruntime-node', 'bin', 'napi-v6');
-    for (const os of readdirSync(bins)) for (const arch of readdirSync(join(bins, os)))
-      if (os !== process.platform || arch !== process.arch) rmSync(join(bins, os, arch), { recursive: true, force: true });
-    for (const os of readdirSync(bins)) if (!readdirSync(join(bins, os)).length) rmSync(join(bins, os), { recursive: true });
-    rmSync(DETECTOR_DIR, { recursive: true, force: true });
-    renameSync(tmp, DETECTOR_DIR);
   } finally { rmSync(tmp, { recursive: true, force: true }); }
 }
 

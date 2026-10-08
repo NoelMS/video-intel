@@ -9,6 +9,7 @@ import * as api from './api.js';
 import * as setup from './setup.mjs';
 import * as indexer from './indexer.mjs';
 import * as sources from './sources.mjs';
+import * as baseline from './baseline.mjs';
 import * as DEMO from './data.js';
 
 const root = dirname(fileURLToPath(import.meta.url));
@@ -122,6 +123,8 @@ async function migrateModel() {
   if (m) await api.setSettings({ vision: { model: `qwen3-vl:${m[1]}-instruct`, setupSeen: false } });
   // Installs from before the object detector are offered it once, through the same first-launch setup prompt.
   if (!(await api.getSettings()).vision.detectorOffered) await api.setSettings({ vision: { detectorOffered: true, ...(!setup.detectorOk() && { setupSeen: false }) } });
+  // ...and once more when the image-search model joined it (only the missing files are downloaded).
+  if (!(await api.getSettings()).vision.imageSearchOffered) await api.setSettings({ vision: { imageSearchOffered: true, ...(!setup.detectorOk() && { setupSeen: false }) } });
 }
 
 // Live feeds and archive imports (sources.mjs). Directory cameras arrive with their public URLs; any URL is limited to
@@ -193,8 +196,8 @@ function startSearch({ text, scope = 'all', context = null, depth }) {
   const id = Math.random().toString(36).slice(2, 10), run = { events: [], done: false, listeners: new Set(), ac: new AbortController() };
   const push = (type, data) => { run.events.push([type, data]); run.listeners.forEach(l => l(type, data)); if (type !== 'stage') run.done = true; };
   const real = api.ds().source === 'mine';   // real footage: no simulated stage delays, and the local model verifies
-  api.search(text, { scope, context, depth, signal: run.ac.signal, onStage: s => push('stage', s),
-    speed: real ? 0 : 1, verify: real ? (e, question) => indexer.verify(e, question) : null })
+  (real ? baseline.objectSimilarities(text) : Promise.resolve(null)).then(sim => api.search(text, { scope, context, depth, signal: run.ac.signal, onStage: s => push('stage', s),
+    speed: real ? 0 : 1, sim, verify: real ? (e, question) => indexer.verify(e, question) : null }))
     .then(r => push('result', r))
     .catch(e => push(e.name === 'AbortError' ? 'cancelled' : 'fail', { message: e.message }));
   runs.set(id, run);
@@ -247,6 +250,8 @@ const routes = [
     return sources.meva(p);
   }],
   ['GET', /^ingest$/, () => ingest()],
+  // the comparison baseline (baseline.mjs): CLIP frame retrieval over the same footage
+  ['POST', /^baseline\/search$/, async req => { const b = await body(req); if (typeof b.text !== 'string' || !b.text.trim() || b.text.length > 500) bad('text must be 1-500 characters'); return baseline.baselineSearch(b.text, { k: Math.min(50, Math.max(1, +b.k || 10)), scope: b.scope || 'all' }); }],
   ['POST', /^feeds$/, async req => ({ added: sources.addFeeds(validFeeds(await body(req))).length, ...ingest() })],
   ['PUT', /^feeds\/([\w-]+)$/, async (req, [id]) => {
     const b = await body(req), patch = {};

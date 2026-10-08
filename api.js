@@ -302,7 +302,22 @@ const wait = (ms, signal) => new Promise((res, rej) => {
 
 // verify(event, question) -> { answer: 'yes' | 'no' | 'unsure', reason, model }: the server passes the local vision
 // model for real footage. The demo has nothing to look at, so it never verifies visually.
-export async function search(text, { scope = 'all', context = null, depth, onStage = () => {}, signal, speed = 1, verify = null } = {}) {
+// Open vocabulary: with image embeddings (real footage), an object's similarity to the query is ranked against the other
+// objects being searched (a percentile, so it is on a 0-1 scale like the label scores), then blended with the share of
+// the query's attribute words its label has. Words outside the label vocabulary still count through the picture; known
+// colours and kinds still sharpen the ranking. Without embeddings (the demo), ranking is the label score as before.
+export const OPEN_VOCAB = { imageWeight: 0.5, pass: 0.75 };
+export function openVocab(pool, q, sim) {
+  const attrsOk = e => q.attrs.every(a => e.attrs.includes(a));
+  if (!sim?.size) return Object.assign(e => score(e), { pass: attrsOk });
+  const vals = pool.map(e => sim.get(e.id)).filter(v => v != null).sort((a, b) => a - b);
+  const pct = v => { let lo = 0, hi = vals.length; while (lo < hi) { const m = (lo + hi) >> 1; vals[m] < v ? lo = m + 1 : hi = m; } return vals.length > 1 ? lo / (vals.length - 1) : 1; };
+  const share = e => q.attrs.length ? q.attrs.filter(a => e.attrs.includes(a)).length / q.attrs.length : null;
+  const rank = e => { const p = sim.has(e.id) ? pct(sim.get(e.id)) : 0, a = share(e); return a == null ? p : OPEN_VOCAB.imageWeight * p + (1 - OPEN_VOCAB.imageWeight) * a; };
+  return Object.assign(rank, { pass: e => (q.attrs.length > 0 && attrsOk(e)) || rank(e) >= OPEN_VOCAB.pass });
+}
+
+export async function search(text, { scope = 'all', context = null, depth, onStage = () => {}, signal, speed = 1, verify = null, sim = null } = {}) {
   const t0 = Date.now();
   const refs = (await getMemory()).filter(r => camera(r.cameraId)), settings = await getSettings();
   const dk = DEPTHS[depth] ? depth : settings.depth, dp = DEPTHS[dk];
@@ -327,8 +342,9 @@ export async function search(text, { scope = 'all', context = null, depth, onSta
   await step('retrieval', `Indexed segments across ${searched.length} camera${searched.length === 1 ? '' : 's'}`, Math.floor(coveredSec / 10));
 
   const pool = D.events.filter(e => searched.some(c => c.id === e.cameraId));
-  const semantic = pool.filter(e => (!q.entity || e.entity === q.entity) && q.attrs.every(a => e.attrs.includes(a)) && (!q.follow || e.track === q.follow.track))
-    .sort((a, b) => score(b) - score(a)).slice(0, dp.topK);
+  const rank = openVocab(pool, q, sim);
+  const semantic = pool.filter(e => (!q.entity || e.entity === q.entity) && (!q.follow || e.track === q.follow.track) && rank.pass(e))
+    .sort((a, b) => rank(b) - rank(a)).slice(0, dp.topK);
   await step('semantic', `Semantic matches · top ${dp.topK === 999 ? 'all' : dp.topK}`, semantic.length);
   const timed = semantic.filter(e => inWin(e, win));
   await step('temporal', 'Inside requested window', timed.length);
@@ -347,7 +363,7 @@ export async function search(text, { scope = 'all', context = null, depth, onSta
   // Visual verification: the model looks at each top candidate's frame again with the question. "no" rejects it.
   const visual = {};
   if (verify && q.intent === 'find' && dk !== 'fast') {
-    for (const e of [...verified].sort((a, b) => score(b) - score(a)).slice(0, dk === 'deep' ? 6 : 3)) {
+    for (const e of [...verified].sort((a, b) => rank(b) - rank(a)).slice(0, dk === 'deep' ? 6 : 3)) {
       if (signal?.aborted) throw new DOMException('Search cancelled', 'AbortError');
       const r = await verify(e, text);
       visual[e.id] = { ok: r.answer === 'yes', text: `Visual check (${r.model}): ${r.answer === 'yes' ? 'confirmed' : r.answer}, ${r.reason}` };
@@ -357,9 +373,9 @@ export async function search(text, { scope = 'all', context = null, depth, onSta
   await step('verification', Object.keys(visual).length ? `Visually checked ${Object.keys(visual).length} by the local model` : 'Verified against evidence', verified.length);
 
   const byTrack = new Map();
-  for (const e of [...verified].sort((a, b) => score(b) - score(a))) if (!byTrack.has(e.track)) byTrack.set(e.track, e);
+  for (const e of [...verified].sort((a, b) => rank(b) - rank(a))) if (!byTrack.has(e.track)) byTrack.set(e.track, e);
   const best = [...byTrack.values()];
-  const diag = { depth: dk, cross: dp.cross, topK: dp.topK, pipeline: { ...settings.pipeline, onPrem: settings.privacy.onPrem }, retrieved: semantic.map(e => ({ id: e.id, score: +score(e).toFixed(3) })) };
+  const diag = { depth: dk, cross: dp.cross, topK: dp.topK, pipeline: { ...settings.pipeline, onPrem: settings.privacy.onPrem }, retrieved: semantic.map(e => ({ id: e.id, score: +rank(e).toFixed(3), ...(sim?.has(e.id) ? { image: +sim.get(e.id).toFixed(3) } : {}) })), openVocab: !!sim?.size };
   const base = { interp: q, window: win, scoped: scoped.map(c => c.id), coverage, rejected, funnel, diag, visual, ms: Date.now() - t0 };
 
   let res;
@@ -370,7 +386,7 @@ export async function search(text, { scope = 'all', context = null, depth, onSta
     res = { ...base, status: verified.length ? 'activity' : 'empty', events: verified.sort((a, b) => sec(a.time) - sec(b.time)).map(e => e.id) };
   } else if (!best.length) {
     res = { ...base, status: rejected.length ? 'refusal' : 'empty' };
-  } else if (best.length === 1 || score(best[0]) - score(best[1]) > 0.15) {
+  } else if (best.length === 1 || rank(best[0]) - rank(best[1]) > 0.15) {
     res = { ...base, status: 'supported', primary: best[0].id, alternatives: best.slice(1).map(e => e.id), checks: [...checks(best[0], q, win), ...(visual[best[0].id] ? [visual[best[0].id]] : [])] };
   } else {
     // the top three side by side; the other matches listed under them, not dropped

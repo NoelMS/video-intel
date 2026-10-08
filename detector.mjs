@@ -27,7 +27,7 @@ export async function load(dir) {
   if (!existsSync(weights) || !existsSync(join(dir, 'node_modules', 'onnxruntime-node'))) return false;
   const ort = createRequire(join(dir, 'x.js'))('onnxruntime-node');
   for (const ep of process.platform === 'win32' ? ['dml', 'cpu'] : ['cpu']) {
-    try { session = await ort.InferenceSession.create(weights, { executionProviders: [ep] }); provider = ep; break; } catch {}
+    try { session = await ort.InferenceSession.create(weights, { executionProviders: [ep], logSeverityLevel: 3 }); provider = ep; break; } catch {}
   }
   if (session) load.Tensor = ort.Tensor;
   return !!session;

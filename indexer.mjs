@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { pipeline } from 'node:stream/promises';
 import * as setup from './setup.mjs';
 import * as detector from './detector.mjs';
+import * as embed from './embed.mjs';
 
 const root = dirname(fileURLToPath(import.meta.url));
 let STORE = join(root, '.store');
@@ -25,6 +26,7 @@ export const playFile = v => join(dirs().videos, v.id + '.play.mp4');
 const PLAYABLE = v => /^(h264|vp8|vp9|av1)$/.test(v.codec) && /\.(mp4|m4v|webm|mov)$/i.test(v.file);
 export const frameFile = (id, n) => join(dirs().frames, id, `${String(n).padStart(6, '0')}.jpg`);
 const detFile = id => join(dirs().frames, id, 'detections.json');
+const embFile = (id, ext) => join(dirs().frames, id, 'embeddings.' + ext);   // .bin: Float32 vectors, .json: what each row is
 
 // ---------- ingest ----------
 const run = (exe, args, onErrLine) => new Promise((res, rej) => {
@@ -83,7 +85,7 @@ let current = null, opts = { model: 'qwen3-vl:2b-instruct', sampling: 0.5, descr
 export const configure = o => { opts = { ...opts, ...o }; };
 export const busy = () => !!current;
 // Clips waiting or being indexed (feeds stop capturing while this is high) and the measured model speed.
-export const WORKING = ['queued', 'transcoding', 'extracting', 'analyzing', 'naming'];
+export const WORKING = ['queued', 'transcoding', 'extracting', 'analyzing', 'naming', 'embedding'];
 // Frames per second sampled. The detector is cheap enough per frame for 5 fps: objects move less between frames, so
 // tracking is more accurate (association F1 0.90 vs 0.82 at 2 fps), and playback boxes are at most 0.2 s old. The
 // vision model alone is not, so it keeps the configured rate.
@@ -98,7 +100,7 @@ export function backlog() {
 function kick() {
   if (current) return;
   const next = listVideos().find(v => WORKING.includes(v.status));
-  if (!next) return;
+  if (!next) return void backfillEmbeddings().catch(() => {});
   current = { id: next.id, cancelled: false };
   index(next).catch(e => { const v = get(current.id); if (v) put({ ...v, status: 'failed', error: e.message }); })
     .finally(() => { current = null; kick(); });
@@ -199,6 +201,7 @@ async function indexWithDetector(v, fdir, frames) {
     put({ ...get(v.id), progress: { done: Math.min(i + SIDE.length, toName.length), total: toName.length } });
   }
   writeFileSync(detFile(v.id), JSON.stringify(dets));
+  if (await embed.load(setup.DETECTOR_DIR)) { put({ ...get(v.id), status: 'embedding' }); if (await embedVideo(v, fdir, dets, tracks, W, H) === false) return; }
   put({ ...get(v.id), status: 'ready', indexedAt: new Date().toISOString(), progress: { done: frames.length, total: frames.length }, skipped: 0,
     found: dets.reduce((n, d) => n + d.objects.length, 0), tracks: tracks.length, ...(frames.length ? { secPerFrame: +((Date.now() - began) / 1000 / frames.length).toFixed(2) } : {}) });
 }
@@ -257,6 +260,62 @@ function privacyBoxes(objects) {
     faces: objects.filter(o => o.type === 'person' && o.box[3] > 12).map(({ box: [x, y, w, h] }) => [r(x + w * 0.15), r(y), r(w * 0.7), r(Math.min(h * 0.22, w * 0.9))]),
     plates: objects.filter(o => ['car', 'truck', 'bus', 'motorcycle'].includes(o.cls) && o.box[2] > 20).map(({ box: [x, y, w, h] }) => [r(x + w * 0.3), r(y + h * 0.6), r(w * 0.4), r(h * 0.25)]),
   };
+}
+
+// Image embeddings (MobileCLIP, embed.mjs) for search: each track's largest sighting, cropped square with some context,
+// and one whole frame per second (centre square, standard CLIP preprocessing; the baseline searches these). One more
+// pass over the frame JPEGs through ffmpeg; ~20 ms an embedding on the GPU.
+async function embedVideo(v, fdir, frames, tracks, W, H) {
+  const r = Math.min(640 / W, 640 / H), want = new Map(), perSecond = new Set();
+  tracks.forEach((tr, tk) => { const rep = tr.dets.reduce((a, b) => b.box[2] * b.box[3] > a.box[2] * a.box[3] ? b : a); want.set(rep.n, [...(want.get(rep.n) || []), { tk, box: rep.box }]); });
+  let second = -1;
+  for (const f of frames) if (Math.floor(f.t) !== second) { second = Math.floor(f.t); perSecond.add(f.n); }
+  const rows = [], vecs = [];
+  let i = 0;
+  for await (const px of detector.frames(setup.ffmpegPath(), join(fdir, '%06d.jpg'))) {
+    if (current?.cancelled) return false;
+    const f = frames[i++];
+    if (!f) break;
+    for (const o of want.get(f.n) || []) {
+      const [x, y, w, h] = [o.box[0] / 640 * W * r, o.box[1] / 360 * H * r, o.box[2] / 640 * W * r, o.box[3] / 360 * H * r], side = Math.max(w, h) * 1.15;
+      vecs.push(await embed.imageEmbed(embed.squareCrop(px, 640, 640, [x + w / 2 - side / 2, y + h / 2 - side / 2, side])));
+      rows.push({ kind: 'track', tk: o.tk, n: f.n, t: f.t });
+    }
+    if (perSecond.has(f.n)) {
+      const pw = W * r, ph = H * r, side = Math.min(pw, ph);
+      vecs.push(await embed.imageEmbed(embed.squareCrop(px, 640, 640, [(pw - side) / 2, (ph - side) / 2, side])));
+      rows.push({ kind: 'frame', n: f.n, t: f.t });
+    }
+  }
+  writeFileSync(embFile(v.id, 'bin'), Buffer.concat(vecs.map(x => Buffer.from(x.buffer))));
+  writeFileSync(embFile(v.id, 'json'), JSON.stringify({ model: 'mobileclip_s0', dim: vecs[0]?.length || 0, rows }));
+  embCache.delete(v.id);
+}
+// A video's embeddings, as { rows, vec(i) } (cached; read by search and the baseline). null when it has none.
+const embCache = new Map();
+export function embeddings(id) {
+  if (embCache.has(id)) return embCache.get(id);
+  if (!existsSync(embFile(id, 'json'))) return null;
+  const meta = JSON.parse(readFileSync(embFile(id, 'json'), 'utf8')), b = readFileSync(embFile(id, 'bin'));
+  const all = new Float32Array(b.buffer, b.byteOffset, b.byteLength / 4), e = { ...meta, vec: i => all.subarray(i * meta.dim, (i + 1) * meta.dim) };
+  embCache.set(id, e);
+  return e;
+}
+// Recordings indexed with the detector before embeddings existed get them while the queue is idle (no re-indexing).
+let backfilling = false;
+async function backfillEmbeddings() {
+  if (backfilling || current || !await embed.load(setup.DETECTOR_DIR)) return;
+  backfilling = true;
+  try {
+    for (const v of listVideos().filter(v => v.status === 'ready' && v.detector && !existsSync(embFile(v.id, 'json')))) {
+      if (current) break;
+      const fdir = join(dirs().frames, v.id), frames = existsSync(detFile(v.id)) ? JSON.parse(readFileSync(detFile(v.id), 'utf8')) : [];
+      const tracks = storedTracks(frames);
+      if (!tracks?.length) continue;
+      const [W, H] = (await run(setup.ffprobePath(), ['-v', 'error', '-show_entries', 'stream=width,height', '-of', 'csv=p=0', frameFile(v.id, 1)])).trim().split(',').map(Number);
+      await embedVideo(v, fdir, frames, tracks, W, H);
+    }
+  } finally { backfilling = false; }
 }
 
 // One unusable reply (empty, cut off, or reasoning instead of JSON) is retried once, then that frame is skipped rather
@@ -433,7 +492,7 @@ function storedTracks(frames) {
   const m = new Map();
   for (const f of frames) for (const o of f.objects) {
     if (o.tk == null) return null;
-    if (!m.has(o.tk)) m.set(o.tk, { type: o.type, dets: [] });
+    if (!m.has(o.tk)) m.set(o.tk, { tk: o.tk, type: o.type, dets: [] });
     m.get(o.tk).dets.push({ ...o, n: f.n, t: f.t, lighting: f.lighting });
   }
   return [...m.values()];
@@ -482,12 +541,15 @@ export function dataset(pick = null) {
       coverage: [], sync: 0, neighbors: [...new Set(vs.flatMap(v => v.neighbors || []))], width: vs[0].width, height: vs[0].height, t0, frames: [],
       clips: vs.length, source: vs[0].source || null };
     for (const v of vs) {
+      const em = embeddings(v.id);
+      if (em) cam.embedded = { objects: (cam.embedded?.objects || 0) + em.rows.filter(r => r.kind === 'track').length, frames: (cam.embedded?.frames || 0) + em.rows.filter(r => r.kind === 'frame').length };
       // Recordings indexed before exactTimes show each frame's scene half a sampling interval after its stored time.
       const late = v.exactTimes ? 0 : 0.5 / (v.sampling || 0.5), off = clockOf(v.start, ZONE, day).sec - t0;
       const frames = (existsSync(detFile(v.id)) ? JSON.parse(readFileSync(detFile(v.id), 'utf8')) : []).map(f => ({ ...f, t: f.t + late }));
       cam.coverage.push([t0 + off, t0 + off + v.duration]);
       cam.frames.push(...frames.map(f => ({ n: f.n, v: v.id, t: +(off + f.t).toFixed(2), faces: f.faces, plates: f.plates })));
-      (storedTracks(frames) ?? track(frames, Math.max(3, 2.5 / (v.sampling || 0.5)))).forEach((tr, k) => {
+      (storedTracks(frames) ?? track(frames, Math.max(3, 2.5 / (v.sampling || 0.5)))).forEach((tr, i) => {
+        const k = tr.tk ?? i;
         const ds = tr.dets, rep = ds.reduce((a, b) => b.box[2] * b.box[3] > a.box[2] * a.box[3] ? b : a);
         const c = d => [+(d.box[0] + d.box[2] / 2).toFixed(1), +(d.box[1] + d.box[3] / 2).toFixed(1)];   // box centre
         const id = `${v.id}_${k}`, trackId = `${v.id}:${k}`;
