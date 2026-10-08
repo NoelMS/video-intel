@@ -348,6 +348,14 @@ dialog.palette { width: min(640px, 92vw); margin-top: 12vh; padding: 0; }
 #toasts { position: fixed; right: 20px; bottom: 20px; display: grid; gap: 8px; z-index: 80; }
 #toasts > p { background: var(--raised); border-left: 2px solid var(--ok); padding: 10px 14px; font: 12px var(--mono); animation: rise var(--med) var(--ease); }
 
+/* page changes (go): header stays put, content cross-fades and slides toward the nav direction (--vt-dir = ±1) */
+.top { view-transition-name: top; }
+::view-transition-group(top) { animation: none; }
+::view-transition-old(top) { display: none; } ::view-transition-new(top) { animation: none; }
+.vt-nav::view-transition-old(root) { animation: vt-out var(--med) var(--ease) both; }
+.vt-nav::view-transition-new(root) { animation: vt-in var(--slow) var(--ease) both; }
+@keyframes vt-out { to { opacity: 0; transform: translateX(calc(var(--vt-dir, 1) * -32px)); filter: blur(2px); } }
+@keyframes vt-in { from { opacity: 0; transform: translateX(calc(var(--vt-dir, 1) * 32px)); } }
 ::view-transition-group(evidence) { animation-duration: var(--slow); animation-timing-function: var(--ease-emph); }
 
 @media (prefers-reduced-motion: reduce) {
@@ -449,7 +457,12 @@ dialog.palette { width: min(640px, 92vw); margin-top: 12vh; padding: 0; }
 .indexing li.done::before { content: '✓'; color: var(--ok); } .indexing li.run::before { content: '●'; color: var(--accent); }
 .indexing li.fail::before { content: '✕'; color: var(--err); } .indexing li.na { color: var(--muted); } .indexing li.na::before { content: '—'; }
 .indexing .bar { flex: 1; min-width: 120px; height: 2px; background: var(--line); position: relative; } .indexing .bar i { position: absolute; inset: 0 auto 0 0; background: var(--accent); }
-.src-video { width: 100%; max-height: 70vh; background: #000; display: block; margin-bottom: 10px; }
+.vplay { position: relative; aspect-ratio: var(--ar); width: min(100%, calc(70vh * var(--ar))); margin: 0 auto 10px; background: #000; }
+.vplay video { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+#vbox { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.vb { position: absolute; border: 1.5px solid var(--accent); border-radius: 2px; box-shadow: 0 0 0 1px rgb(0 0 0 / .35); }
+.vb.person { border-color: #7fc4d8; } .vb.person span { background: #7fc4d8; }
+.vb span { position: absolute; left: -1.5px; bottom: 100%; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 1px 5px; font: 600 10.5px/1.4 var(--mono); color: #111; background: var(--accent); }
 @media (max-width: 1080px) { .video-item { grid-template-columns: 1fr; } .reg .fld { grid-template-columns: 1fr; } .reg .fld .dim { grid-column: 1; } }
 
 /* evidence board */
@@ -514,10 +527,18 @@ dialog.intro { width: 100vw; height: 100vh; max-width: none; max-height: none; m
   .board .card-ctl select { max-width: 100%; }
 }
 
-/* scrollbars: thin, themed (standard properties; Chromium 121+, Firefox) */
-html { scrollbar-color: var(--line-strong) var(--bg); }
-* { scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
-*:hover { scrollbar-color: var(--muted) transparent; }
+/* scrollbars: floating pill thumb on an invisible track; widens and takes the accent while in use.
+   Chromium ignores ::-webkit-scrollbar once scrollbar-color is set, so the standard properties are Firefox-only. */
+::-webkit-scrollbar { width: 12px; height: 12px; }
+::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--line-strong); border: 4px solid transparent; border-radius: 999px; background-clip: padding-box; min-height: 40px; }
+::-webkit-scrollbar-thumb:hover { background-color: var(--muted); border-width: 3px; }
+::-webkit-scrollbar-thumb:active { background-color: var(--accent); border-width: 3px; }
+::-webkit-scrollbar-button { display: none; }
+@supports not selector(::-webkit-scrollbar) {
+  * { scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+  *:hover { scrollbar-color: var(--muted) transparent; }
+}
 
 /* header status cluster: sentence case, sans, icon buttons, keycaps */
 .sys { font: 500 12.5px/1 var(--sans); color: var(--text-2); gap: 6px; }
@@ -536,20 +557,32 @@ kbd { font: 500 10.5px/1 var(--mono); color: var(--text-2); padding: 3px 5px 2px
 
 /* local analysis setup */
 dialog.setup { width: min(760px, 96vw); }
-.setup { display: grid; gap: 22px; }
-.setup .lede { font-size: 15.5px; }
-.parts > li { display: grid; grid-template-columns: 22px 1fr; gap: 12px; padding: 14px 0; border-top: 1px solid var(--line); }
-.parts .st { color: var(--muted); font-size: 15px; line-height: 1.4; } .parts .ok .st { color: var(--ok); }
-.parts p { font-size: 14.5px; } .parts p.dim { font-size: 13.5px; margin-top: 2px; }
-.models { border: 0; padding: 0; margin: 10px 0 0; display: grid; gap: 4px; }
-.models .opt { padding: 8px 0; border-bottom: 0; }
-.rec { font: 500 10.5px/1 var(--mono); color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); border-radius: 999px; padding: 2px 7px; margin-left: 4px; }
-.custom-model { display: block; margin-top: 6px; width: 240px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r1); padding: 6px 8px; font: 13px var(--mono); }
+.kicker { font: 600 13px/1.4 var(--sans); color: var(--text-2); margin: 0 0 6px; }
+.setup { display: grid; gap: 20px; }
+.setup-title { font: 700 28px/1.15 var(--sans); letter-spacing: -.025em; max-width: 24ch; }
+.setup .lede { font-size: 15px; color: var(--text-2); max-width: 60ch; }
+.parts > li { display: grid; grid-template-columns: 20px 1fr; gap: 14px; padding: 16px 0; border-top: 1px solid var(--line); }
+.parts .st svg { width: 18px; height: 18px; margin-top: 1px; fill: none; stroke: var(--line-strong); stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+.parts .ok .st svg { stroke: var(--ok); } .parts .ok .st circle { fill: color-mix(in srgb, var(--ok) 14%, transparent); }
+.pn { font: 600 15px/1.4 var(--sans); display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px; }
+.tag { font: 500 12.5px/1 var(--sans); color: var(--muted); } .ok .tag { color: var(--ok); }
+.pd { display: block; font-size: 13.5px; color: var(--muted); margin-top: 3px; }
+.models { border: 0; padding: 0; margin: 12px 0 0; display: grid; gap: 8px; }
+.models .opt { display: grid; grid-template-columns: 18px 1fr; gap: 12px; align-items: start; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--r2); cursor: pointer; transition: border-color var(--fast), background var(--fast); }
+.models .opt:hover { border-color: var(--line-strong); }
+.models .opt:has(input:checked) { border-color: color-mix(in srgb, var(--accent) 60%, transparent); background: color-mix(in srgb, var(--accent) 5%, transparent); }
+.models .opt input { margin: 3px 0 0; accent-color: var(--accent); }
+.models[disabled] .opt { cursor: default; opacity: .7; }
+.on { font: 600 14px/1.4 var(--sans); display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
+.size { font: 500 12.5px/1 var(--sans); color: var(--muted); font-variant-numeric: tabular-nums; }
+.rec { font: 600 12px/1 var(--sans); color: var(--accent); }
+.custom-model { display: block; margin-top: 8px; width: 240px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r1); padding: 7px 9px; font: 13px var(--mono); }
 .progress li { display: grid; grid-template-columns: 1fr 160px 110px; gap: 12px; align-items: center; padding: 6px 0; font-size: 13.5px; }
 .progress .bar { height: 3px; background: var(--line); position: relative; } .progress .bar i { position: absolute; inset: 0 auto 0 0; background: var(--accent); transition: width var(--med); }
 .progress .done span:first-child { color: var(--ok); } .progress .failed span:first-child { color: var(--err); }
 .progress .mono { font-size: 11px; text-align: right; }
 .local { margin-top: 48px; max-width: 880px; }
+.boot-fail { max-width: 640px; margin: 18vh auto; padding: 0 24px; display: grid; gap: 14px; }
 @media (max-width: 680px) { .progress li { grid-template-columns: 1fr; } }
 
 /* your recordings */

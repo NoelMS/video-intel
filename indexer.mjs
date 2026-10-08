@@ -1,7 +1,7 @@
 // Indexes your recordings: ffmpeg samples frames (dropping near-duplicates), a local Ollama vision model describes
 // each frame, detections are linked into tracks, tracks become events in the same shape as the demo data, and
 // tracks on different cameras that look alike are linked as possible journeys. All local.
-import { createWriteStream, existsSync, mkdirSync, readFileSync, writeFileSync, rmSync, readdirSync, statSync } from 'node:fs';
+import { createWriteStream, existsSync, mkdirSync, readFileSync, writeFileSync, rmSync, readdirSync, statSync, renameSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -19,6 +19,9 @@ export const listVideos = () => load('vi.videos', []);
 const put = v => save('vi.videos', listVideos().map(x => x.id === v.id ? v : x));
 const get = id => listVideos().find(v => v.id === id);
 export const videoFile = v => join(dirs().videos, v.file);
+// Browser-playable copy, only made when the source codec or container is one browsers cannot play (H.265, DivX, mkv...)
+export const playFile = v => join(dirs().videos, v.id + '.play.mp4');
+const PLAYABLE = v => /^(h264|vp8|vp9|av1)$/.test(v.codec) && /\.(mp4|m4v|webm|mov)$/i.test(v.file);
 export const frameFile = (id, n) => join(dirs().frames, id, `${String(n).padStart(6, '0')}.jpg`);
 const detFile = id => join(dirs().frames, id, 'detections.json');
 
@@ -27,15 +30,15 @@ const run = (exe, args, onErrLine) => new Promise((res, rej) => {
   const p = spawn(exe, args, { windowsHide: true });
   let out = '', err = '';
   p.stdout.on('data', d => out += d);
-  p.stderr.on('data', d => { err += d; if (onErrLine) for (const l of String(d).split(/\r?\n/)) onErrLine(l); });
+  p.stderr.on('data', d => { err += d; if (onErrLine) for (const l of String(d).split(/[\r\n]+/)) onErrLine(l); });
   p.on('error', rej).on('exit', code => code ? rej(new Error(err.split('\n').filter(Boolean).slice(-2).join(' ') || `exit ${code}`)) : res(out));
 });
 
 export async function probe(file) {
-  const out = JSON.parse(await run(setup.ffprobePath(), ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height:format=duration', '-of', 'json', file]));
+  const out = JSON.parse(await run(setup.ffprobePath(), ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height,codec_name:format=duration', '-of', 'json', file]));
   const s = out.streams?.[0];
   if (!s || !(+out.format?.duration > 0)) throw new Error('No playable video stream found');
-  return { duration: +out.format.duration, width: s.width, height: s.height };
+  return { duration: +out.format.duration, width: s.width, height: s.height, codec: s.codec_name };
 }
 
 // Stream an upload to disk, probe it, queue it. meta is validated by the server.
@@ -57,7 +60,7 @@ export function removeVideo(id) {
   const v = get(id);
   if (!v) return;
   if (current?.id === id) current.cancelled = true;
-  rmSync(videoFile(v), { force: true }); rmSync(join(dirs().frames, id), { recursive: true, force: true });
+  rmSync(videoFile(v), { force: true }); rmSync(playFile(v), { force: true }); rmSync(join(dirs().frames, id), { recursive: true, force: true });
   save('vi.videos', listVideos().filter(x => x.id !== id));
 }
 // Re-index from scratch, so a new sampling rate or model takes effect.
@@ -71,13 +74,13 @@ export function reindex(id) {
 }
 
 // ---------- queue (one video at a time; survives restarts because state is persisted) ----------
-let current = null, opts = { model: 'qwen3-vl:2b', sampling: 0.5, describe: null };   // describe: test hook
+let current = null, opts = { model: 'qwen3-vl:2b-instruct', sampling: 0.5, describe: null };   // describe: test hook
 export const configure = o => { opts = { ...opts, ...o }; };
 export const busy = () => !!current;
 
 function kick() {
   if (current) return;
-  const next = listVideos().find(v => ['queued', 'extracting', 'analyzing'].includes(v.status));
+  const next = listVideos().find(v => ['queued', 'transcoding', 'extracting', 'analyzing'].includes(v.status));
   if (!next) return;
   current = { id: next.id, cancelled: false };
   index(next).catch(e => { const v = get(current.id); if (v) put({ ...v, status: 'failed', error: e.message }); })
@@ -87,6 +90,16 @@ export const resume = kick;
 
 async function index(v) {
   const fdir = join(dirs().frames, v.id);
+  // 0. playback: H.264 copy when the browser cannot play the source (written to .tmp first so a cancel never leaves half a file)
+  if (!PLAYABLE(v) && !existsSync(playFile(v))) {
+    put({ ...v, status: 'transcoding', progress: { done: 0, total: Math.round(v.duration) } });
+    const tmp = playFile(v) + '.tmp';
+    await run(setup.ffmpegPath(), ['-hide_banner', '-y', '-i', videoFile(v), '-map', '0:v:0', '-map', '0:a:0?', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '26',
+      '-pix_fmt', 'yuv420p', '-vf', "scale='min(1280,iw)':-2", '-c:a', 'aac', '-b:a', '96k', '-movflags', '+faststart', '-f', 'mp4', tmp],
+    line => { const m = line.match(/time=(\d+):(\d+):([\d.]+)/); if (m) put({ ...get(v.id), progress: { done: Math.round(+m[1] * 3600 + +m[2] * 60 + +m[3]), total: Math.round(v.duration) } }); });
+    if (current.cancelled) return rmSync(tmp, { force: true });
+    renameSync(tmp, playFile(v));
+  }
   // 1. frames: sample at opts.sampling fps, drop near-identical frames (static CCTV), scale to 768 px wide
   if (!existsSync(join(fdir, 'frames.json'))) {
     put({ ...v, status: 'extracting', progress: { done: 0, total: Math.round(v.duration) } });
@@ -133,18 +146,28 @@ const SCHEMA = {
     lighting: { enum: ['good', 'low', 'night'] },
   },
 };
-const PROMPT = `Index this CCTV frame. List each person, vehicle, animal and carried bag once: type; a short label naming colours and clothing, carried items or vehicle body type (e.g. "woman in red jacket with black backpack", "white delivery van"); box [x1, y1, x2, y2] in 0-1000 image coordinates; action. Then boxes of clearly visible faces and licence plates, and the lighting. Only what you can see.`;
+// No example labels: the 2B model copied them verbatim onto unrelated people.
+const PROMPT = `Index this CCTV frame. List each distinct person, vehicle, animal and carried bag exactly once: type; a short label with its actual colours and clothing, carried items or vehicle body type; box [x1, y1, x2, y2] in 0-1000 image coordinates; action. Then boxes of clearly visible faces and licence plates, and the lighting. Only what you can see; never repeat an object.`;
 
 async function chat(images, prompt, format) {
   const res = await fetch(setup.OLLAMA + '/api/chat', { method: 'POST', body: JSON.stringify({
     // num_ctx: one frame plus the prompt is ~1-2K tokens; the model's 256K default would not fit in memory.
-    // think: false: Qwen3-VL reasons before answering by default, which costs ~40 s a frame for no gain here.
+    // Use the -instruct tags: plain qwen3-vl:2b is the thinking variant, and on Ollama 0.40 it ignores think: false and
+    // /no_think once a schema is set, reasoning until num_ctx runs out (2,940 tokens, 110 s, no JSON).
     model: opts.model, stream: false, format, think: false, keep_alive: '10m', options: { temperature: 0, num_ctx: 4096 },
     messages: [{ role: 'user', content: prompt, images }] }) });
   if (!res.ok) throw new Error(`Ollama ${res.status}: ${(await res.text()).slice(0, 200)}`);
-  // With a schema, Ollama 0.31 returns this model's JSON in `thinking` and leaves `content` empty; accept either.
+  // Older Ollama put a thinking model's JSON in `thinking` with `content` empty, so look in both.
   const m = (await res.json()).message;
-  return JSON.parse(m.content?.trim() || m.thinking);
+  for (const text of [m.content, m.thinking]) { const j = jsonIn(text); if (j) return j; }
+  throw new Error(m.thinking
+    ? `${opts.model} spent its whole reply reasoning. Pick an -instruct model (e.g. qwen3-vl:2b-instruct) in System → Local analysis.`
+    : 'The vision model did not return JSON. Try again, or pick another model in System → Local analysis.');
+}
+export function jsonIn(text) {
+  const t = String(text ?? '').replace(/<think>[\s\S]*?(<\/think>|$)/g, '').trim(), i = t.indexOf('{');
+  if (i < 0) return null;
+  try { return JSON.parse(t.slice(i, t.lastIndexOf('}') + 1)); } catch { return null; }
 }
 
 // 0-1000 corner boxes -> [x, y, w, h] in the app's 640x360 frame space
@@ -154,8 +177,10 @@ const toFrame = b => {
   return [a * 0.64, bb * 0.36, (c - a) * 0.64, (d - bb) * 0.36].map(n => +n.toFixed(1));
 };
 
-// Small models sometimes list one object twice; same type with heavily overlapping boxes is the same object.
-const dedupe = os => os.filter((o, i) => !os.slice(0, i).some(p => p.type === o.type && iou(p.box, o.box) > 0.7));
+// Small models sometimes list one object twice (same type, heavily overlapping boxes), or fall into a loop that repeats
+// one label with an identical-size box stepped sideways; both are dropped.
+const sameSize = (a, b) => Math.abs(a[2] - b[2]) < 1 && Math.abs(a[3] - b[3]) < 1;
+const dedupe = os => os.filter((o, i) => !os.slice(0, i).some(p => p.type === o.type && (iou(p.box, o.box) > 0.7 || (p.label === o.label && sameSize(p.box, o.box)))));
 
 export async function describeFrame(b64) {
   const r = await chat([b64], PROMPT, SCHEMA);

@@ -67,7 +67,7 @@ assert.ok(!(await api.getSaved()).some(x => x.id === 'journey:A17'));
 // server: persistence + validation + SSE stages
 const { start } = await import('./server.mjs');
 const { tmpdir } = await import('node:os');
-const { mkdtempSync, rmSync, writeFileSync, mkdirSync } = await import('node:fs');
+const { mkdtempSync, rmSync, writeFileSync, mkdirSync, existsSync, readFileSync } = await import('node:fs');
 const storeDir = mkdtempSync(`${tmpdir()}/vi-check-`), store = `${storeDir}/store.json`;
 let srv = await start(0, store);
 const base = `http://localhost:${srv.address().port}/api/`;
@@ -78,6 +78,7 @@ assert.equal((await call('settings', 'PUT', { depth: 'fast' }, { 'content-type':
 const { get } = await import('node:http');
 const rebound = await new Promise(r => get({ host: '127.0.0.1', port: srv.address().port, path: '/api/health', headers: { host: 'evil.example' } }, res => r(res.statusCode)));
 assert.equal(rebound, 421);
+assert.equal((await call('health'))[1].stale, false, 'freshly started server is not stale');
 assert.equal((await call('memory', 'POST', { name: 'Bad', cameraId: 'cam_02', region: [600, 0, 100, 10] }))[0], 400, 'region outside frame rejected');
 assert.equal((await call('memory', 'POST', { name: 'East Gate', cameraId: 'cam_02', region: [250, 150, 120, 180] }))[0], 200);
 const [, { id }] = await call('search', 'POST', { text: 'Did anyone enter the east gate?' });
@@ -117,6 +118,32 @@ const person = (n, t, x) => ({ n, t, lighting: 'good', objects: [{ type: 'person
 const tr = indexer.track([person(1, 0, 100), person(2, 2, 110), person(3, 4, 400), person(4, 30, 405)], 6);
 assert.deepEqual(tr.map(t => t.dets.map(d => d.n)), [[1, 2], [3], [4]], 'overlap links, a jump or a long gap starts a new track');
 
+// vision model replies: JSON in content (Ollama 0.40) or in thinking after reasoning (0.31), never the reasoning itself
+{
+  const { jsonIn } = await import('./indexer.mjs');
+  assert.deepEqual(jsonIn('{"objects":[]}'), { objects: [] });
+  assert.deepEqual(jsonIn('<think>\nGo look {not json}</think>\n{"objects":[1]}'), { objects: [1] });
+  assert.equal(jsonIn('<think>\nSo, the frame shows a bus {maybe}'), null, 'unfinished reasoning is not parsed as JSON');
+  assert.equal(jsonIn(''), null);
+}
+
+// installer downloads resume after a dropped connection and still hash the whole file
+{
+  const { createServer } = await import('node:http'), { createHash, randomBytes } = await import('node:crypto');
+  const blob = randomBytes(300000); let dropped = false;
+  const ds = createServer((req, res) => {
+    const from = +(/bytes=(\d+)-/.exec(req.headers.range || '')?.[1] || 0);
+    res.writeHead(from ? 206 : 200, { 'content-length': blob.length - from });
+    if (!dropped) { dropped = true; res.write(blob.subarray(0, 120000)); return setTimeout(() => res.socket.destroy(), 50); }
+    res.end(blob.subarray(from));
+  }).listen(0);
+  const { download } = await import('./setup.mjs'), step = {}, file = `${storeDir}/dl.bin`;
+  const sum = await download(`http://127.0.0.1:${ds.address().port}/f`, file, step);
+  assert.equal(sum, createHash('sha256').update(blob).digest('hex'), 'resumed download is byte-identical');
+  assert.equal(step.done, blob.length);
+  ds.close();
+}
+
 // full pipeline on a real (generated) video with ffmpeg, a stand-in for the vision model, and search over it
 const { ffmpegPath } = await import('./setup.mjs');
 if (ffmpegPath()) {
@@ -141,6 +168,21 @@ if (ffmpegPath()) {
   assert.equal(ranged.status, 206); assert.equal((await ranged.arrayBuffer()).byteLength, 100);
   const [, { id: sid }] = await (async () => { const x = await fetch(b2 + 'search', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text: 'Find the man in a red jacket', depth: 'fast' }) }); return [x.status, await x.json()]; })();
   assert.match(await (await fetch(b2 + `search/${sid}/events`)).text(), /"status":"supported"/, 'search runs over indexed footage');
+  assert.ok(mine.events[0].dets.length > 1, 'events carry per-frame boxes for playback overlays');
+  assert.ok(!existsSync(indexer.playFile(vid)), 'browser-playable H.264 source gets no copy');
+  // H.265 (what most CCTV exports) gets an H.264 copy, served at /play; /file stays the untouched source
+  const hevc = `${storeDir}/cctv.mkv`;
+  await new Promise((res, rej) => spawn(ffmpegPath(), ['-v', 'error', '-f', 'lavfi', '-i', 'testsrc=duration=4:size=320x180:rate=10', '-c:v', 'libx265', '-pix_fmt', 'yuv420p', hevc])
+    .on('exit', c => c ? rej(new Error('ffmpeg hevc clip failed')) : res()));
+  await fetch(b2 + 'videos?' + new URLSearchParams({ ...meta, name: 'Rear', filename: 'cctv.mkv' }), { method: 'POST', headers: { 'content-type': 'video/x-matroska' }, body: readFileSync(hevc) });
+  const h = async () => (await (await fetch(b2 + 'videos')).json()).find(v => v.name === 'Rear');
+  for (let i = 0; i < 150 && (await h()).status !== 'ready'; i++) await new Promise(res => setTimeout(res, 200));
+  const hv = await h();
+  assert.equal(hv.status, 'ready', JSON.stringify(hv)); assert.equal(hv.codec, 'hevc');
+  assert.equal((await fetch(b2 + `videos/${hv.id}/play`)).headers.get('content-type'), 'video/mp4');
+  assert.equal((await fetch(b2 + `videos/${hv.id}/file`)).headers.get('content-type'), 'video/x-matroska');
+  const probed = await indexer.probe(indexer.playFile(hv));
+  assert.equal(probed.codec, 'h264'); assert.equal(Math.round(probed.duration), 4);
   indexer.configure({ describe: null });
   srv.close();
 } else console.log('(ffmpeg not installed: skipped the video pipeline check)');

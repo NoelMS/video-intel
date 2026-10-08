@@ -79,7 +79,7 @@ function header() {
     <button class="mark" data-act="go" data-view="search">Multi-Stream <b>Video Intelligence</b></button>
     <nav aria-label="Primary">${nav.map(([v, l]) => `<button data-act="go" data-view="${v}" ${S.view === v ? 'aria-current="page"' : ''}>${l}</button>`).join('')}</nav>
     <div class="sys">
-      <span class="mode" role="group" aria-label="Footage"><button aria-pressed="${!!ds().DEMO}" data-act="source" data-src="demo" title="Synthetic demo footage">Demo</button><button aria-pressed="${!ds().DEMO}" data-act="source" data-src="mine" ${mode === 'server' ? 'title="Your indexed recordings"' : 'disabled title="Needs the local server: run Start.cmd"'}>My footage</button></span>
+      <span class="mode" role="group" aria-label="Footage"><button aria-pressed="${!!ds().DEMO}" data-act="source" data-src="demo" title="Synthetic demo footage">Demo</button><button aria-pressed="${!ds().DEMO}" data-act="source" data-src="mine" ${mode === 'server' ? 'title="Your indexed recordings"' : 'disabled title="Needs the local server: open Video Intelligence.exe"'}>My footage</button></span>
       <button class="icon-btn" data-act="go" data-view="system" aria-label="Privacy masking ${pv().faces || pv().plates ? 'on' : 'off'}" title="Privacy masking ${pv().faces || pv().plates ? 'on' : 'off'}">${ICON[pv().faces || pv().plates ? 'shield' : 'shieldOff']}</button>
       <button class="icon-btn" data-act="theme" aria-label="Theme: ${theme()}" title="Theme: ${theme()}">${ICON[theme()]}</button>
       <button class="keys" data-act="palette" aria-label="Open command menu (Ctrl K)" title="Command menu"><kbd>Ctrl</kbd><kbd>K</kbd></button>
@@ -595,7 +595,7 @@ function evidenceLayer({ id, off = 0, focus = false }) {
           <button class="btn primary" data-act="save" data-id="${id}">Save evidence</button>
           <button class="btn" data-act="follow" data-track="${e.track}">Follow this ${noun}</button>
           <button class="txt" data-act="exportone" data-id="${id}" ${exportBlock() ? `disabled title="${exportBlock()}"` : ''}>Export evidence</button>
-          ${cam(e.cameraId).real ? `<button class="txt" data-act="play-orig" data-id="${e.cameraId}" data-t="${e.t}">Play original video</button><a class="txt" href="api/videos/${e.cameraId}/file" download>Download source</a>`
+          ${cam(e.cameraId).real ? `<button class="txt" data-act="play-orig" data-id="${e.cameraId}" data-t="${e.t}">Play with detections</button><button class="txt" data-act="play-orig" data-id="${e.cameraId}" data-t="${e.t}" data-det="0">Play original video</button><a class="txt" href="api/videos/${e.cameraId}/file" download>Download source</a>`
             : '<button class="txt" disabled title="No source video in the demo">Download clip</button>'}
           ${maskable(e) ? `<button class="txt" data-act="reveal" data-id="${id}" ${S.settings.operator.role !== 'supervisor' && !S.reveal ? 'disabled title="Requires the supervisor role"' : ''}>${S.reveal ? 'Restore masking' : 'Reveal protected regions'}</button>` : ''}</div>
         ${S.reveal ? '<p class="warn mono">PROTECTED REGIONS REVEALED · this view is logged in the audit trail</p>' : ''}
@@ -675,22 +675,24 @@ const setupReady = s => s.ffmpeg.ok && s.ollama.running && s.model.ok;
 function setupLayer() {
   const s = S.setup, j = s.job, running = j && !j.finished, model = S.setupModel ?? s.model.name;
   const known = Object.keys(s.models).includes(model);
-  const row = (key, name, note, ok, okText) => `<li class="${ok ? 'ok' : ''}"><span class="st" aria-hidden="true">${ok ? '✓' : '○'}</span>
-    <div><p><b>${name}</b> <span class="mono dim">${ok ? okText : 'not installed'}</span></p><p class="dim">${note}</p></div></li>`;
-  return `<header class="ev-top"><p class="eyebrow">LOCAL ANALYSIS</p><button class="txt" data-act="close">Close · Esc</button></header>
+  const mark = ok => `<span class="st" aria-hidden="true">${ok ? '<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="7"/><path d="m5 8.2 2 2 4-4.4"/></svg>' : '<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="7"/></svg>'}</span>`;
+  const row = (name, note, ok, okText) => `<li class="${ok ? 'ok' : ''}">${mark(ok)}
+    <div><p class="pn">${name} <span class="tag">${ok ? okText : 'Not installed'}</span></p><p class="pd">${note}</p></div></li>`;
+  const modelOk = s.model.ok && s.model.name === model;
+  return `<header class="ev-top"><p class="kicker">Local analysis</p><button class="txt" data-act="close">Close · Esc</button></header>
     <div class="setup">
-      <h2 class="claim">Search your own recordings, privately.</h2>
+      <h2 class="setup-title">Search your own recordings, privately.</h2>
       <p class="lede">Your footage is analysed on this computer by a local vision model. Nothing is uploaded. Downloads are checked against their published checksums, and nothing needs admin rights.</p>
       <ol class="parts">
-        ${row('ffmpeg', ...SETUP_PARTS[0].slice(1), s.ffmpeg.ok, 'installed')}
-        ${row('ollama', ...SETUP_PARTS[1].slice(1), s.ollama.installed, `installed${s.ollama.version ? ' · v' + s.ollama.version : ''}${s.ollama.running ? '' : ' · not running'}`)}
-        <li class="${s.model.ok && s.model.name === model ? 'ok' : ''}"><span class="st" aria-hidden="true">${s.model.ok && s.model.name === model ? '✓' : '○'}</span><div>
-          <p><b>Vision model</b> <span class="mono dim">${s.model.ok && s.model.name === model ? model + ' · downloaded' : 'choose one'}</span></p>
+        ${row(...SETUP_PARTS[0].slice(1), s.ffmpeg.ok, 'Installed')}
+        ${row(...SETUP_PARTS[1].slice(1), s.ollama.installed, `Installed${s.ollama.version ? ' · version ' + s.ollama.version : ''}${s.ollama.running ? '' : ' · not running'}`)}
+        <li class="${modelOk ? 'ok' : ''}">${mark(modelOk)}<div>
+          <p class="pn">Vision model <span class="tag">${modelOk ? model + ' · downloaded' : 'Choose one'}</span></p>
           <fieldset class="models" ${running ? 'disabled' : ''}><legend class="sr-only">Vision model</legend>
             ${Object.entries(s.models).map(([k, m], i) => `<label class="opt"><input type="radio" name="vmodel" value="${k}" ${model === k ? 'checked' : ''}>
-              <span><b>${k}</b> <span class="mono dim">${m.size}</span>${i === 0 ? ' <span class="rec">Recommended</span>' : ''}<br><span class="dim">${m.note}</span></span></label>`).join('')}
+              <span><span class="on">${k}<span class="size">${m.size}</span>${i === 0 ? '<span class="rec">Recommended</span>' : ''}</span><span class="pd">${m.note}</span></span></label>`).join('')}
             <label class="opt"><input type="radio" name="vmodel" value="custom" ${known ? '' : 'checked'}>
-              <span><b>Another Ollama model</b><br><span class="dim">For example one you have trained or imported yourself. It must accept images.</span>
+              <span><span class="on">Another Ollama model</span><span class="pd">For example one you have trained or imported yourself. It must accept images.</span>
               <input class="custom-model" name="custom" value="${known ? '' : esc(model)}" placeholder="name:tag" pattern="[\\w.\\-]+(/[\\w.\\-]+)*(:[\\w.\\-]+)?"></span></label>
           </fieldset></div></li>
       </ol>
@@ -721,7 +723,7 @@ function pollSetup() {
   clearTimeout(setupPoll);
   const tick = async () => {
     S.setup = await api.getSetup();
-    if (S.layer?.kind === 'setup') openLayer({ kind: 'setup' });
+    if (S.layer?.kind === 'setup' && dlg.open) { const y = dlg.scrollTop; dlg.innerHTML = setupLayer(); dlg.scrollTop = y; }   // not openLayer: it refocuses the top
     if (S.setup.job && !S.setup.job.finished) setupPoll = setTimeout(tick, 700);
     else if (S.setup.job && !S.setup.job.error) toast('Local analysis is ready');
   };
@@ -763,7 +765,8 @@ function playIntro() {
 // The server stores each upload; ffmpeg samples frames and the local vision model describes them (indexer.mjs).
 const TZS = ['Asia/Kolkata', 'UTC', 'Europe/London', 'America/New_York', 'Asia/Singapore', 'Australia/Sydney'];
 const mb = n => n < 1048576 ? Math.ceil(n / 1024) + ' KB' : (n / 1048576).toFixed(n < 1e8 ? 1 : 0) + ' MB';
-const VSTATE = { queued: 'Queued', extracting: 'Extracting frames', analyzing: 'Analysing frames', ready: 'Indexed', failed: 'Failed' };
+const WORKING = ['queued', 'transcoding', 'extracting', 'analyzing'];
+const VSTATE = { queued: 'Queued', transcoding: 'Making a browser-playable copy', extracting: 'Extracting frames', analyzing: 'Analysing frames', ready: 'Indexed', failed: 'Failed' };
 const localNow = () => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 16); };
 let videoPoll = null;
 
@@ -816,15 +819,15 @@ function videosList() {
   if (!S.videos.length) return `<section class="empty-footage"><p><b>No recordings yet.</b> Add recorded video; it is analysed here by ${esc(S.settings.vision.model)} and never leaves this computer.</p>
     <button class="btn primary" data-act="register">Add a recording</button></section>`;
   return `<section class="reg-list"><p class="eyebrow">RECORDINGS</p><ol>${S.videos.map(v => {
-    const p = v.progress || {}, pct = p.total ? Math.round(p.done / p.total * 100) : 0, working = ['queued', 'extracting', 'analyzing'].includes(v.status);
+    const p = v.progress || {}, pct = p.total ? Math.round(p.done / p.total * 100) : 0, working = WORKING.includes(v.status);
     return `<li class="video-item ${v.status}">
       <div class="vthumb">${['analyzing', 'ready'].includes(v.status) ? `<img src="api/videos/${v.id}/frames/1" alt="">` : '<span class="mono dim">no frames yet</span>'}</div>
       <div><h3>${esc(v.name)}</h3><p class="mono dim">${esc(v.location)} · ${esc(v.tz)} · ${new Date(v.start).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'medium' })}</p>
         <p class="mono dim">${v.width}×${v.height} · ${dur(Math.round(v.duration))} · ${mb(v.size)}${v.model ? ` · ${esc(v.model)} at ${v.sampling} fps` : ''}</p>
-        <div class="vstate"><span class="mono">${VSTATE[v.status]}${working && p.total ? ` · ${v.status === 'extracting' ? `${dur(p.done)} of ${dur(p.total)}` : `${p.done} / ${p.total} frames`}` : ''}</span>
+        <div class="vstate"><span class="mono">${VSTATE[v.status]}${working && p.total ? ` · ${v.status !== 'analyzing' ? `${dur(p.done)} of ${dur(p.total)}` : `${p.done} / ${p.total} frames`}` : ''}</span>
           ${working ? `<span class="bar"><i style="width:${pct}%"></i></span>` : ''}</div>
         ${v.error ? `<p class="warn">${esc(v.error)}</p>` : ''}
-        <div class="acts">${v.status === 'ready' ? `<button class="txt" data-act="play-orig" data-id="${v.id}" data-t="0">Play original</button>` : ''}
+        <div class="acts">${v.status === 'ready' ? `<button class="txt" data-act="play-orig" data-id="${v.id}" data-t="0">Play with detections</button><button class="txt" data-act="play-orig" data-id="${v.id}" data-t="0" data-det="0">Play original</button>` : ''}
           ${['ready', 'failed'].includes(v.status) ? `<button class="txt" data-act="video-reindex" data-id="${v.id}">Re-index</button>` : ''}
           <button class="txt danger" data-act="video-del" data-id="${v.id}">Remove</button></div></div></li>`; }).join('')}</ol></section>`;
 }
@@ -837,19 +840,43 @@ function pollVideos() {
     S.videos = await api.getVideos();
     if (S.videos.filter(v => v.status === 'ready').length !== readyBefore && !ds().DEMO) { await loadDataset(); if (S.view !== 'cameras') render(); }
     if (S.view === 'cameras') $('#videos') ? ($('#videos').innerHTML = videosList()) : render();
-    if (S.videos.some(v => ['queued', 'extracting', 'analyzing'].includes(v.status))) videoPoll = setTimeout(tick, 2000);
+    if (S.videos.some(v => WORKING.includes(v.status))) videoPoll = setTimeout(tick, 2000);
     else if (S.view === 'cameras') render();
   };
   tick();
 }
 
-function videoLayer({ id, t = 0 }) {
-  const c = cam(id) ?? S.videos.find(v => v.id === id);
-  return `<header class="ev-top"><p class="eyebrow">ORIGINAL VIDEO · ${esc(c.name)}</p><button class="txt" data-act="close">Close · Esc</button></header>
-    <h2 class="sr-only">${esc(c.name)} original video</h2>
-    <video class="src-video" src="api/videos/${id}/file#t=${Math.max(0, +t - 3)}" controls autoplay muted
-      onerror="this.outerHTML='<p class=&quot;warn&quot;>This browser cannot play the file’s codec (common with H.265 CCTV exports). The evidence view uses the extracted frames instead.</p>'"></video>
-    <p class="mono dim">Unmodified source file. Privacy masks apply to extracted frames only, not to the original.</p>`;
+// Playback of a recording, with the indexed tracks drawn over it (or the original picture alone).
+const V = { evs: [], det: true, gap: 2 };
+function videoLayer({ id, t = 0, det = true }) {
+  const c = cam(id) ?? S.videos.find(v => v.id === id), sv = S.videos.find(v => v.id === id);
+  V.evs = allEvents.filter(e => e.cameraId === id && e.dets?.length);
+  V.det = det && V.evs.length > 0; V.gap = 1 / (sv?.sampling || 0.5);
+  const seg = ([m, l]) => `<button data-act="vmode" data-m="${m}" aria-pressed="${(m === 'det') === V.det}" ${m === 'det' && !V.evs.length ? 'disabled title="Not indexed yet"' : ''}>${l}</button>`;
+  cancelAnimationFrame(V.raf); V.raf = requestAnimationFrame(drawBoxes);
+  return `<header class="ev-top"><p class="eyebrow">RECORDING · ${esc(c.name)}</p>
+      <div><span class="mode" role="group" aria-label="Playback">${[['det', 'With detections'], ['orig', 'Original']].map(seg).join('')}</span>
+      <button class="txt" data-act="close">Close · Esc</button></div></header>
+    <h2 class="sr-only">${esc(c.name)} recording</h2>
+    <div class="vplay" style="--ar:${c.width || 16}/${c.height || 9}">
+      <video id="vplay" src="api/videos/${id}/play#t=${Math.max(0, +t - 3)}" controls autoplay muted playsinline
+        onerror="this.parentNode.outerHTML='<p class=&quot;warn&quot;>This recording cannot be played. Re-index it to make a browser-playable copy.</p>'"></video>
+      <div id="vbox" aria-hidden="true"></div></div>
+    <p class="mono dim">${V.evs.length ? `${V.evs.length} tracked object${V.evs.length === 1 ? '' : 's'} · boxes are interpolated between frames sampled every ${V.gap}s. ` : ''}Privacy masks apply to extracted frames only, not to playback.</p>`;
+}
+// Box at time t: interpolated inside the track, held for half a sampling interval at either end.
+function boxAt(ds, t) {
+  if (t < ds[0].t - V.gap / 2 || t > ds.at(-1).t + V.gap / 2) return null;
+  const i = ds.findIndex(d => d.t > t);
+  if (i <= 0) return (i ? ds.at(-1) : ds[0]).box;
+  const [a, b] = [ds[i - 1], ds[i]], k = (t - a.t) / (b.t - a.t);
+  return a.box.map((n, j) => n + (b.box[j] - n) * k);
+}
+function drawBoxes() {
+  const v = $('#vplay'), box = $('#vbox');
+  if (!v || !box || !dlg.open) return;
+  box.innerHTML = !V.det ? '' : V.evs.map(e => { const b = boxAt(e.dets, v.currentTime); return b ? `<div class="vb ${e.entity}" style="left:${b[0] / 6.4}%;top:${b[1] / 3.6}%;width:${b[2] / 6.4}%;height:${b[3] / 3.6}%"><span>${tid(e.track)} · ${esc(e.label)}</span></div>` : ''; }).join('');
+  V.raf = requestAnimationFrame(drawBoxes);
 }
 
 async function loadDataset() {
@@ -912,7 +939,7 @@ function watchState(w) {
 }
 const watchesList = () => S.watches.map(w => { const [st, term] = watchState(w), hits = S.alerts.filter(a => a.watchId === w.id).length;
   return `<li class="watch"><p class="wq">“${esc(w.text)}”</p><dl class="kv">
-    <div><dt>Status</dt><dd class="mono">${w.status.toUpperCase()} · ${st}</dd></div><div><dt>Scope</dt><dd>${w.scope === 'all' ? 'All cameras' : cam(w.scope).code + ' · ' + cam(w.scope).name}</dd></div>
+    <div><dt>Status</dt><dd class="mono">${w.status.toUpperCase()} · ${st}</dd></div><div><dt>Scope</dt><dd>${w.scope === 'all' ? 'All cameras' : cam(w.scope) ? cam(w.scope).code + ' · ' + cam(w.scope).name : `<span class="dim">${esc(w.scope)} · not in this footage</span>`}</dd></div>
     <div><dt>Schedule</dt><dd class="mono">${w.from} → ${w.to}${sec(w.from + ':00') > sec(w.to + ':00') ? ' (overnight)' : ''}</dd></div><div><dt>Alerts</dt><dd>${hits}</dd></div></dl>
     <div class="acts"><button class="txt" data-act="watch-toggle" data-id="${w.id}">${w.status === 'active' ? 'Pause' : 'Resume'}</button>
     ${term ? `<button class="txt" data-act="define-term" data-term="${esc(term)}">Define “${esc(term)}”</button>` : ''}<button class="txt danger" data-act="watch-del" data-id="${w.id}">Delete</button></div></li>`;
@@ -1036,7 +1063,7 @@ function systemView() {
         <p class="dim">Viewers cannot export. Only supervisors can reveal masked regions, and every reveal is logged.</p></fieldset>
       <div class="acts"><button class="btn primary">Save settings</button>${S.res ? '<button type="button" class="txt" data-act="diag">Last search diagnostics</button>' : ''}</div>
     </form>
-    ${mode === 'server' ? `<section class="local"><p class="eyebrow">LOCAL ANALYSIS</p><p class="dim">Vision model <b class="mono">${esc(S.settings.vision.model)}</b> via Ollama, with ffmpeg for decoding.</p>
+    ${mode === 'server' ? `<section class="local"><p class="kicker">Local analysis</p><p class="dim">Vision model <b class="mono">${esc(S.settings.vision.model)}</b> via Ollama, with ffmpeg for decoding.</p>
       <div class="acts"><button class="btn" data-act="setup">Check or install components</button></div></section>` : ''}
     <section class="audit"><p class="eyebrow">AUDIT TRAIL</p>${S.audit.some(a => ev(a.eventId)) ? `<ol>${S.audit.filter(a => ev(a.eventId)).map(a => `<li class="mono"><span>${new Date(a.at).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'medium' })}</span><span>${a.action.toUpperCase()}</span><span>${a.role}</span><button class="txt" data-act="open" data-id="${a.eventId}">${cam(ev(a.eventId).cameraId).code} · ${ev(a.eventId).time}</button></li>`).join('')}</ol>` : '<p class="dim">No protected regions have been revealed.</p>'}</section>
   </section>`;
@@ -1071,7 +1098,7 @@ async function reveal(id) {
 // ---------- command palette ----------
 const PAL = { items: [], i: 0 };
 const commands = () => [
-  ['Search footage', () => { go('search'); focusQ(); }],
+  ['Search footage', () => go('search', focusQ)],
   ['Open cameras', () => go('cameras')], ['Open visual memory', () => go('memory')], ['Open investigation', () => go('investigation')],
   ...(S.res?.primary ? [['Open primary evidence', () => openEvidence(S.res.primary)]] : []),
   ...(S.res?.candidates ? [['Compare candidates', () => openLayer({ kind: 'compare', ids: S.res.candidates })]] : []),
@@ -1081,7 +1108,7 @@ const commands = () => [
   ['Play the opening demonstration', () => playIntro()],
   [`Turn privacy masking ${S.settings.privacy.faces || S.settings.privacy.plates ? 'off' : 'on'}`, togglePrivacy],
   ['Export investigation', () => exportPackage()],
-  ...cams.filter(c => c.status !== 'offline').map(c => [`Search ${c.code} · ${c.name}`, () => { S.scope = c.id; go('search'); focusQ(); }]),
+  ...cams.filter(c => c.status !== 'offline').map(c => [`Search ${c.code} · ${c.name}`, () => { S.scope = c.id; go('search', focusQ); }]),
   ...allEvents.map(e => [`Jump to ${cam(e.cameraId).code} ${e.time} · ${name(e)}`, () => openEvidence(e.id)]),
 ];
 const paletteLayer = () => `<div class="pal"><label class="sr-only" for="pal-q">Command</label>
@@ -1100,7 +1127,17 @@ function palDraw() {
 const palRun = i => { const c = PAL.items[i]; if (!c) return; dlg.close(); c[1](); };
 
 // ---------- actions ----------
-function go(view) { set({ view }); scrollTo(0, 0); }
+// Page changes cross-fade and slide in the nav's direction. The swap is async under a view transition, so work that
+// needs the new page (focus, scroll) goes in `after`.
+const ORDER = ['search', 'cameras', 'live', 'memory', 'investigation', 'system'];
+function go(view, after) {
+  const swap = () => { set({ view }); scrollTo(0, 0); after?.(); };
+  if (view === S.view || !document.startViewTransition || reduced.matches || dlg.open) return swap();
+  const root = document.documentElement;
+  root.style.setProperty('--vt-dir', ORDER.indexOf(view) < ORDER.indexOf(S.view) ? -1 : 1);
+  root.classList.add('vt-nav');
+  document.startViewTransition(swap).finished.finally(() => root.classList.remove('vt-nav'));
+}
 function focusQ() { const q = $('#q'); q?.focus(); q?.select(); }
 function follow(track) { if (dlg.open) dlg.close(); S.context = { track }; S.jtab = 'sequence'; run('Where did it go?'); }
 
@@ -1194,7 +1231,8 @@ const ACT = {
   'compare-picked': () => openLayer({ kind: 'compare', ids: [...picked] }),
   register: async () => { S.setup = await api.getSetup(); openLayer({ kind: 'register' }); },
   source: d => switchSource(d.src),
-  'play-orig': d => openLayer({ kind: 'video', id: d.id, t: +d.t }),
+  'play-orig': d => openLayer({ kind: 'video', id: d.id, t: +d.t, det: d.det !== '0' }),
+  vmode: (d, b) => { V.det = d.m === 'det'; $$('[data-act=vmode]').forEach(x => x.setAttribute('aria-pressed', x === b)); },
   'video-reindex': async d => { await api.reindexVideo(d.id); pollVideos(); },
   'video-del': async d => {
     const v = S.videos.find(x => x.id === d.id);
@@ -1215,8 +1253,8 @@ const ACT = {
   save: async d => { await api.saveEvidence(d.id, S.query); S.saved = await api.getSaved(); toast('Evidence saved to investigation'); },
   unsave: async d => { await api.removeEvidence(d.id); picked.delete(d.id); S.saved = await api.getSaved(); render(); },
   export: () => exportPackage(), exportone: d => exportPackage(d.id),
-  camera: d => { S.camFocus = d.id; go('cameras'); $('#row-' + d.id)?.scrollIntoView({ block: 'center' }); },
-  scope: d => { S.scope = d.id; go('search'); focusQ(); },
+  camera: d => { S.camFocus = d.id; go('cameras', () => $('#row-' + d.id)?.scrollIntoView({ block: 'center' })); },
+  scope: d => { S.scope = d.id; go('search', focusQ); },
   define: () => openResolver({}),
   redefine: d => { const r = S.memory.find(x => x.id === d.id); openResolver({ id: r.id, name: r.name, cameraId: r.cameraId, rect: [...r.region] }); },
   forget: async d => {
@@ -1336,7 +1374,7 @@ document.addEventListener('keydown', e => {
     return;
   }
   if (dlg.open) return;
-  if (k === '/') { e.preventDefault(); if (S.view !== 'search') go('search'); focusQ(); }
+  if (k === '/') { e.preventDefault(); S.view === 'search' ? focusQ() : go('search', focusQ); }
   else if (k === 'm') go('memory');
   else if (k === 'e' && S.res?.primary) openEvidence(S.res.primary);
   else if (k === 'c' && S.res?.candidates) openLayer({ kind: 'compare', ids: S.res.candidates });
@@ -1364,13 +1402,19 @@ function render() {
   scrollTo(0, y);
 }
 
-await loadDataset();
-[S.memory, S.history, S.saved, S.notes, S.settings, S.audit, S.watches, S.alerts] = await Promise.all([
-  api.getMemory(), api.getHistory(), api.getSaved(), api.getNotes(), api.getSettings(), api.getAudit(), api.getWatches(), api.getAlerts()]);
-if (mode === 'server') { S.videos = await api.getVideos(); if (S.videos.some(v => v.status !== 'ready' && v.status !== 'failed')) pollVideos(); }
+try {
+  await loadDataset();
+  [S.memory, S.history, S.saved, S.notes, S.settings, S.audit, S.watches, S.alerts] = await Promise.all([
+    api.getMemory(), api.getHistory(), api.getSaved(), api.getNotes(), api.getSettings(), api.getAudit(), api.getWatches(), api.getAlerts()]);
+  if (mode === 'server') { S.videos = await api.getVideos(); if (S.videos.some(v => v.status !== 'ready' && v.status !== 'failed')) pollVideos(); }
+} catch (e) {
+  $('#app').innerHTML = `<main class="boot-fail"><p class="eyebrow">Could not start</p><h1 class="claim">The local server did not answer as expected.</h1>
+    <p class="dim">${esc(e.message)}</p><p>Close this window and open <b>Video Intelligence.exe</b> again; it restarts an outdated server.</p></main>`;
+  throw e;
+}
 render();
 // First launch: offer to set up local analysis (server mode only; the browser-only mock cannot run models).
-if (mode === 'server' && !S.settings.vision.setupSeen) api.getSetup().then(s => { if (!setupReady(s)) { S.setup = s; openLayer({ kind: 'setup' }); } }).catch(() => {});
+if (mode === 'server' && !S.settings.vision.setupSeen) api.getSetup().then(s => { if (!setupReady(s)) { S.setup = s; openLayer({ kind: 'setup' }); if (s.job && !s.job.finished) pollSetup(); } }).catch(() => {});
 
 
 // Installable app (PWA); the worker only serves offline.html when the local server is down.
