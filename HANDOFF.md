@@ -13,7 +13,7 @@ Two data sources, switched in the header (`settings.source`):
 ## Run
 
 ```
-Start.cmd                       # one click: Node 18+, builds launcher.exe, starts the server hidden on :8000, opens the app window, exits
+"Video Intelligence.exe"        # launcher window: Node 18+ (installs a private copy if missing), restarts a stale server, starts it hidden on :8000, opens the app window
 npm start                       # node server.mjs: static + REST + SSE, persists to .store/store.json (PORT, VI_STORE env)
 python -m http.server 8000      # static-only alternative: the in-browser mock backend is used, state in localStorage
 npm run check                   # §174 flows, server validation/guards/SSE/persistence, tracker unit test, and (when
@@ -38,8 +38,8 @@ ES modules need an http origin. Opening `index.html` from disk will not work.
 | `service.js` | Backend selection: `{ api, mode }`. Pure helpers always from `api.js`, endpoints from `remote.js` when the server answers |
 | `remote.js` | fetch/EventSource client for `server.mjs`, same signatures as `api.js` endpoints |
 | `server.mjs` | Node (no deps): static files, `/api/*` REST, `POST /api/search` + `GET /api/search/:id/events` SSE, `DELETE /api/search/:id` cancels. Validates every write (trust boundary). `GET /api/videos/:id/play` = browser-playable copy (or the source), `/file` = untouched original |
-| `launcher.cs` | Windowless launcher, compiled on the user's machine by `start.ps1` with the csc.exe that ships with Windows (`/target:winexe`, so no console). It starts `server.mjs` with `CreateNoWindow`, `PORT=8000`, `VI_IDLE_EXIT`, and `VI_LOG=.runtime\server.log`, waits for health, then exits. Node's path comes from `.runtime\node-path.txt` |
-| `Start.cmd` / `start.ps1` | One-click launcher (Windows). Finds Node 18+ (PATH, Program Files, `.runtime`). If missing: `winget install OpenJS.NodeJS.LTS`, else a portable LTS zip into `.runtime\` verified against nodejs.org `SHASUMS256.txt` (no admin). Re-click while running just reopens the browser. `-Portable` forces the private runtime; `-NoBrowser` skips opening it. Closing the window stops the server |
+| `launcher.cs` → `Video Intelligence.exe` | The thing users open. WinForms, GUI subsystem, so no console ever. Built with the C# 5 compiler that ships with Windows (build command in the file header; commit the rebuilt exe). Up-to-date server already running: opens the app with no window. Otherwise it shows a borderless, DPI-aware, owner-drawn window (app colours, Segoe UI Variable / Cascadia Mono, accent progress line, Win11 rounded corners and border via DWM), and then: stops a stale `node` listener on 8000 (never kills another program), finds Node 18+ (PATH, Program Files, `.runtime\node`) or downloads the LTS zip with live MB progress and verifies SHA-256 before unpacking, registers `video-intel://` → `"exe" --background`, starts `server.mjs` with `CreateNoWindow`, `PORT=8000`, `VI_IDLE_EXIT=180000` and `VI_LOG=.runtime\server.log`, waits for health, then opens the app. Failure shows the reason with Open log / Close. `--preview <dir>` renders each state to PNG without doing anything (screen capture from an agent shell does not see new windows) |
+| `icon.ico` | `icon-192.png` wrapped as a PNG-in-ICO; embedded into the exe with `/win32icon` |
 | `manifest.webmanifest`, `icon.svg`, `icon-192.png`, `icon-512.png` | PWA install metadata. PNGs are rendered from `icon.svg` with headless Chrome (`--screenshot --default-background-color=00000000`) |
 | `sw.js`, `offline.html` | The service worker's only job: when a navigation fails (server down, e.g. app opened from its installed icon) it serves `offline.html`, which fires `video-intel://start` (automatically, plus a button for when the browser wants a click), polls `/api/health`, and reloads into the app. It never caches the app or the API. Bump the cache name (now `vi-offline-v3`) when `offline.html` changes |
 | `package.json` | `type: module`, `start`/`check` scripts. No dependencies |
@@ -106,6 +106,12 @@ ES modules need an http origin. Opening `index.html` from disk will not work.
   - `go(view, after)` wraps page swaps in `document.startViewTransition` (skipped for reduced motion, open dialogs and same-page). The `vt-nav` class scopes the root slide/fade so the evidence morph keeps its own animation; `--vt-dir` is ±1 from nav order (`ORDER`). The header has its own transition name so it does not move. The swap is async, so focus/scroll work goes in `after`.
   - Scrollbars: `::-webkit-scrollbar` pill thumb (transparent border + `background-clip`); the standard `scrollbar-color` is inside `@supports not selector(::-webkit-scrollbar)` because Chromium ignores the pseudo-elements once it is set.
   - Fixed: Live page crashed in My footage mode when a watch was scoped to a demo camera (`cam(w.scope)` undefined).
+
+- **Launcher window, stale server, setup dialog**:
+  - `Start.cmd` and `start.ps1` are gone: any `.cmd` flashes a console. `Video Intelligence.exe` (see Files) does everything start.ps1 did, minus winget (a private Node in `.runtime\node` is always used when none is found). Untested path: a real Node download on a machine without Node; the index.json and SHASUMS regexes were checked against live nodejs.org (v24.21.0).
+  - **Blank page cause**: a server started before a `git pull` kept running, because the open app pings `/api/health` every 60 s so idle exit never fires, and the old launcher treated any answering server as current. The new client then called routes the old server lacked (`/api/dataset` 404) and boot threw, leaving `#app` empty. Now `/api/health` returns `stale` (server-side code mtime > process start), the launcher restarts a stale or pre-`stale` server, and a boot failure renders a "Could not start" message instead of nothing. Verified on the real stale process (started 14:40, replaced, `/api/dataset` 200).
+  - Setup dialog: sentence-case sans labels instead of mono caps (`.kicker`, `.pn`, `.tag`, `.pd`), SVG status marks, model choices as selectable cards (`:has(input:checked)`). `offline.html` label likewise; `sw.js` cache bumped to `vi-offline-v4`.
+  - Scroll jump during installs: `pollSetup` called `openLayer`, which rebuilds and refocuses the top. It now swaps `dlg.innerHTML` and restores `dlg.scrollTop`. The first-launch auto-open also starts polling when a job is already running (it used to freeze). Verified with Playwright by mocking `/api/setup` (scrollTop 329 held across polls).
 
 ## Footage sources (researched)
 

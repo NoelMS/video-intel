@@ -22,7 +22,7 @@ graph TD
   check[check.mjs<br/>flow + server + tracker assertions]
   sw[sw.js<br/>offline fallback only]
   offline[offline.html<br/>fires video-intel://start, polls health]
-  launcher[Start.cmd → start.ps1 → launcher.exe<br/>ensure Node, start server hidden, open app window]
+  launcher[Video Intelligence.exe<br/>launcher window: ensure Node, restart stale server,<br/>start server hidden, open app window]
 
   index --> styles
   index --> app
