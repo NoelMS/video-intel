@@ -22,7 +22,8 @@ const STRENGTH = { strong: 'LIKELY SAME ENTITY', likely: 'LIKELY CONTINUATION', 
 let cams = [], allEvents = [];
 const S = {
   view: 'search', phase: 'idle', query: '', scope: 'all', stages: [], interp: null, res: null, context: null, error: null,
-  memory: [], history: [], saved: [], notes: '', settings: api.DEFAULT_SETTINGS, depth: null, reveal: false, audit: [], zoom: 0, jtab: 'sequence', resolver: null, layer: null, camFocus: null, abort: null,
+  memory: [], history: [], saved: [], notes: '', settings: api.DEFAULT_SETTINGS, depth: null, reveal: false, audit: [], watches: [], alerts: [],
+  live: { running: false, done: false, t: api.W[0], speed: 60, feed: [], streams: {}, lastAt: null, ac: null }, zoom: 0, jtab: 'sequence', resolver: null, layer: null, camFocus: null, abort: null,
 };
 const set = patch => { Object.assign(S, patch); render(); };
 
@@ -62,7 +63,7 @@ function header() {
     <button class="mark" data-act="go" data-view="search">Multi-Stream <b>Video Intelligence</b></button>
     <nav aria-label="Primary">${nav.map(([v, l]) => `<button data-act="go" data-view="${v}" ${S.view === v ? 'aria-current="page"' : ''}>${l}</button>`).join('')}</nav>
     <div class="sys mono">
-      <span class="mode" role="group" aria-label="Source"><button aria-pressed="true">Recorded</button><button disabled title="Live ingest is not connected in this build">Live</button></span>
+      <span class="mode" role="group" aria-label="Source"><button aria-pressed="${S.view !== 'live'}" data-act="go" data-view="search">Recorded</button><button aria-pressed="${S.view === 'live'}" data-act="go" data-view="live" title="Simulated: replays recorded footage">Live${S.live.running ? ' ●' : ''}</button></span>
       <span class="dim">INDEX COMPLETE</span>
       <span class="dim" title="${mode === 'server' ? 'Persisted by server.mjs' : 'Persisted in this browser only'}">STORE ${mode.toUpperCase()}</span>
       ${DEMO ? '<span class="demo" title="Footage, detections and timings are synthetic">DEMO DATA</span>' : ''}
@@ -598,6 +599,103 @@ function passportLayer({ track }) {
     <div class="acts"><button class="btn" data-act="follow" data-track="${track}">Open journey</button></div>`;
 }
 
+// ---------- live (§32), standing queries (§33), alerts (§34) ----------
+// Simulated: replays the recorded hour. Labelled as such everywhere; nothing here claims to be happening now.
+function liveView() {
+  const L = S.live;
+  return `<section class="page"><header class="page-h"><p class="eyebrow">LIVE · SIMULATED</p><h1>Watching the replay.</h1>
+    <p class="lede">No live ingest is connected. This replays the recorded hour through the same detection and standing-query path a live stream would use. Nothing shown here is happening now.</p></header>
+    <div class="live-bar">
+      <div><p class="eyebrow">REPLAY CLOCK</p><div id="live-clock">${liveClock()}</div></div>
+      <div class="acts">
+        <button class="btn primary" data-act="live-toggle">${L.running ? 'Pause' : L.done ? 'Replay again' : L.t > W[0] ? 'Resume' : 'Start replay'}</button>
+        <label class="mono">SPEED <select id="live-speed">${[30, 60, 120, 300].map(s => `<option value="${s}" ${L.speed === s ? 'selected' : ''}>${s}×</option>`).join('')}</select></label>
+        ${L.t > W[0] && !L.running ? '<button class="txt" data-act="live-reset">Reset to 09:00</button>' : ''}</div>
+    </div>
+    <div class="live-grid">
+      <section><p class="eyebrow">STREAMS</p><ul id="live-cams" class="live-cams">${liveCams()}</ul></section>
+      <section><p class="eyebrow">DETECTIONS</p><ol id="live-feed" class="live-feed">${liveFeed()}</ol></section>
+    </div>
+    <div class="live-grid">
+      <section><p class="eyebrow">STANDING QUERIES</p><ol class="watches" id="live-watches">${watchesList()}</ol>${watchForm()}</section>
+      <section><p class="eyebrow">ALERTS</p><ol id="live-alerts" class="alerts">${alertsList()}</ol></section>
+    </div></section>`;
+}
+
+const liveClock = () => {
+  const L = S.live, ago = L.lastAt ? Math.round((Date.now() - L.lastAt) / 1000) : null;
+  return `<p class="live-clock mono">${hms(L.t)} <span class="dim">${TZ}</span></p>
+    <p class="mono dim">${L.running ? `INDEXING · up to ${hms(L.t)}` : L.done ? 'REPLAY COMPLETE · INDEX COMPLETE' : L.t > W[0] ? 'PAUSED' : 'READY'}${ago != null ? ` · last detection ${ago}s ago (wall clock)` : ''}</p>`;
+};
+const liveCams = () => cams.map(c => {
+  const st = S.live.streams[c.id] ?? api.streamState(c, S.live.t), last = S.live.feed.find(f => ev(f.id).cameraId === c.id);
+  return `<li class="${st === 'STREAMING' ? '' : 'nosig'}"><b class="mono">${c.code}</b><span>${c.name}</span><span class="mono">${st}</span><span class="mono dim">${last ? ev(last.id).time : '—'}</span></li>`;
+}).join('');
+const liveFeed = () => S.live.feed.map(f => { const e = ev(f.id);
+  return `<li><button class="thumb" data-act="open" data-id="${e.id}" aria-label="Open ${e.time}">${still(e, { crop: true })}</button>
+    <div><p class="mono">${e.time} · ${cam(e.cameraId).code}</p><p>${esc(e.label)}</p><p class="mono dim">watch evaluation ${f.evalMs} ms${f.watches.length ? ' · <span class="warn">ALERT</span>' : ''}</p></div></li>`;
+}).join('') || '<li class="dim">No detections yet in this replay.</li>';
+function watchState(w) {
+  const q = api.interpret(w.text, S.memory, null);
+  if (q.location && !q.location.ref) return ['NEEDS REFERENT', q.location.term];
+  return [w.status === 'paused' ? 'PAUSED' : api.inSchedule(S.live.t, w) ? 'IN SCHEDULE' : 'OUT OF SCHEDULE'];
+}
+const watchesList = () => S.watches.map(w => { const [st, term] = watchState(w), hits = S.alerts.filter(a => a.watchId === w.id).length;
+  return `<li class="watch"><p class="wq">“${esc(w.text)}”</p><dl class="kv">
+    <div><dt>Status</dt><dd class="mono">${w.status.toUpperCase()} · ${st}</dd></div><div><dt>Scope</dt><dd>${w.scope === 'all' ? 'All cameras' : cam(w.scope).code + ' · ' + cam(w.scope).name}</dd></div>
+    <div><dt>Schedule</dt><dd class="mono">${w.from} → ${w.to}${sec(w.from + ':00') > sec(w.to + ':00') ? ' (overnight)' : ''}</dd></div><div><dt>Alerts</dt><dd>${hits}</dd></div></dl>
+    <div class="acts"><button class="txt" data-act="watch-toggle" data-id="${w.id}">${w.status === 'active' ? 'Pause' : 'Resume'}</button>
+    ${term ? `<button class="txt" data-act="define-term" data-term="${esc(term)}">Define “${esc(term)}”</button>` : ''}<button class="txt danger" data-act="watch-del" data-id="${w.id}">Delete</button></div></li>`;
+}).join('') || '<li class="dim">No standing queries.</li>';
+const watchForm = () => `<form class="watch-form" data-form="watch"><p class="eyebrow">NEW STANDING QUERY</p>
+  <label class="fld">Watch for<input name="text" required maxlength="300" placeholder="Anyone entering the rear entrance"></label>
+  <label class="fld">Cameras<select name="scope"><option value="all">All cameras</option>${cams.map(c => `<option value="${c.id}">${c.code} · ${c.name}</option>`).join('')}</select></label>
+  <label class="fld">Active from<input type="time" name="from" value="20:00" required></label>
+  <label class="fld">Until<input type="time" name="to" value="06:00" required></label>
+  <div class="acts"><button class="btn">Save standing query</button><span class="dim">Applies from the next replay start.</span></div></form>`;
+const alertsList = () => S.alerts.map(a => { const e = ev(a.eventId);
+  return `<li><p class="eyebrow warn">NEW EVENT · ${esc(cam(e.cameraId).name.toUpperCase())}</p><p class="mono">${e.time} ${TZ}</p><p>${esc(e.label)}</p>
+    <p class="mono dim">Watch: “${esc(a.watchText)}”</p><button class="txt" data-act="open" data-id="${e.id}">View evidence</button></li>`;
+}).join('') || '<li class="dim">No alerts.</li>';
+
+function liveUpdate() {
+  for (const [id, fn] of [['live-clock', liveClock], ['live-cams', liveCams], ['live-feed', liveFeed], ['live-alerts', alertsList], ['live-watches', watchesList]]) {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = fn();
+  }
+}
+
+async function liveStart() {
+  const L = S.live;
+  if (L.done) Object.assign(L, { t: W[0], feed: [], streams: {}, done: false, lastAt: null });
+  L.ac = new AbortController(); L.running = true; render();
+  try {
+    await api.live({ speed: L.speed, from: L.t, signal: L.ac.signal,
+      onTick: d => { L.t = d.t; L.streams = d.streams; liveUpdate(); },
+      onEvent: d => { L.feed.unshift(d); L.feed.length = Math.min(L.feed.length, 30); L.lastAt = Date.now(); liveUpdate(); },
+      onAlert: a => { S.alerts.unshift(a); notify(a); liveUpdate(); } });
+    L.done = true;
+  } catch (e) { if (e.name !== 'AbortError') toast(e.message); }
+  L.running = false;
+  render();
+}
+
+function notify(a) {
+  const e = ev(a.eventId), t = document.createElement('div');
+  t.className = 'alert-toast';
+  t.innerHTML = `<p class="eyebrow warn">NEW EVENT · ${esc(cam(e.cameraId).name.toUpperCase())} · ${e.time}</p><p>${esc(e.label)}</p>
+    <p class="mono dim">“${esc(a.watchText)}”</p><button class="txt" data-act="open" data-id="${e.id}">View evidence</button>`;
+  $('#toasts').append(t); setTimeout(() => t.remove(), 9000);
+}
+
+async function saveWatch(form) {
+  const fd = new FormData(form);
+  try {
+    await api.createWatch({ text: fd.get('text').trim(), scope: fd.get('scope'), from: fd.get('from'), to: fd.get('to') });
+    S.watches = await api.getWatches(); toast('Standing query saved'); render();
+  } catch (e) { toast(e.message); }
+}
+
 // ---------- diagnostics (§66, §120, §121, §154) ----------
 function diagLayer() {
   const r = S.res, d = r.diag, q = r.interp;
@@ -706,6 +804,7 @@ const commands = () => [
   ...(S.res?.candidates ? [['Compare candidates', () => openLayer({ kind: 'compare', ids: S.res.candidates })]] : []),
   ...(S.context ? [[`Open journey · ${tracks[S.context.track]}`, () => follow(S.context.track)]] : []),
   ['Define a visual referent', () => openResolver({})],
+  ['Open live (simulated replay)', () => go('live')],
   [`Turn privacy masking ${S.settings.privacy.faces || S.settings.privacy.plates ? 'off' : 'on'}`, togglePrivacy],
   ['Export investigation', () => exportPackage()],
   ...cams.filter(c => c.status !== 'offline').map(c => [`Search ${c.code} · ${c.name}`, () => { S.scope = c.id; go('search'); focusQ(); }]),
@@ -802,6 +901,11 @@ function cycleTheme() {
 
 const ACT = {
   theme: cycleTheme,
+  'live-toggle': () => S.live.running ? S.live.ac.abort() : liveStart(),
+  'live-reset': () => { S.live.ac?.abort(); Object.assign(S.live, { t: W[0], feed: [], streams: {}, done: false, lastAt: null }); render(); },
+  'watch-toggle': async d => { const w = S.watches.find(x => x.id === d.id); await api.updateWatch(d.id, { status: w.status === 'active' ? 'paused' : 'active' }); S.watches = await api.getWatches(); render(); },
+  'watch-del': async d => { if (!confirm('Delete this standing query? Its past alerts stay in the log.')) return; await api.deleteWatch(d.id); S.watches = await api.getWatches(); render(); },
+  'define-term': d => openResolver({ name: d.term.replace(/\b\w/g, m => m.toUpperCase()), term: d.term }),
   diag: () => openLayer({ kind: 'diag' }),
   go: d => go(d.view), ask: d => run(d.q), open: (d, el) => openEvidence(d.id, +(d.off || 0), el),
   close: () => dlg.close(), cancel: () => S.abort?.abort(), unfollow: () => set({ context: null }),
@@ -842,6 +946,7 @@ dlg.addEventListener('click', e => {
 
 document.addEventListener('submit', e => {
   if (e.target.dataset.form === 'settings') { e.preventDefault(); return saveSettings(e.target); }
+  if (e.target.dataset.form === 'watch') { e.preventDefault(); return saveWatch(e.target); }
   if (e.target.dataset.form !== 'search') return;
   e.preventDefault();
   const fd = new FormData(e.target);
@@ -859,6 +964,7 @@ document.addEventListener('input', e => {
 document.addEventListener('change', e => {
   const t = e.target;
   if (t.id === 'speed') P.speed = +t.value;
+  else if (t.id === 'live-speed') S.live.speed = +t.value;
   else if (t.dataset.tog) { P[t.dataset.tog] = t.checked; drawFrame(); }
   else if (t.name === 'scope') S.scope = t.value;
 });
@@ -931,12 +1037,13 @@ if (matchMedia('(hover: hover) and (pointer: fine)').matches && !reduced.matches
 }
 
 // ---------- render ----------
-const VIEWS = { search: searchView, cameras: camerasView, memory: memoryView, investigation: investigationView, system: systemView };
+const VIEWS = { live: liveView, search: searchView, cameras: camerasView, memory: memoryView, investigation: investigationView, system: systemView };
 function render() {
   const y = scrollY;
   $('#app').innerHTML = header() + `<main id="main" tabindex="-1">${VIEWS[S.view]()}</main>`;
   scrollTo(0, y);
 }
 
-[cams, allEvents, S.memory, S.history, S.saved, S.notes, S.settings, S.audit] = await Promise.all([api.getCameras(), api.getEvents(), api.getMemory(), api.getHistory(), api.getSaved(), api.getNotes(), api.getSettings(), api.getAudit()]);
+[cams, allEvents, S.memory, S.history, S.saved, S.notes, S.settings, S.audit, S.watches, S.alerts] = await Promise.all([api.getCameras(), api.getEvents(),
+  api.getMemory(), api.getHistory(), api.getSaved(), api.getNotes(), api.getSettings(), api.getAudit(), api.getWatches(), api.getAlerts()]);
 render();

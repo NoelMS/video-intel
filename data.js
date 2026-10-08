@@ -58,7 +58,7 @@ export const events = [
     attrs: ['black', 'jacket', 'bag', 'large'], action: 'walking', label: 'Person carrying a large black bag crosses parking', path: [[600, 256], [140, 270]],
     conf: { semantic: 0.74, visual: 0.58 }, quality: { occlusion: 'low', blur: 'high', lighting: 'medium', angle: 'medium' } },
   { id: 'ev_095012', cameraId: 'cam_09', time: '09:50:12', track: 'P21', entity: 'person', look: person('#33302c', 'bag'),
-    attrs: ['black', 'dark', 'coat', 'bag', 'large'], action: 'waiting', label: 'Person with a large dark bag waits near the rear entrance', path: [[330, 268], [380, 262]],
+    attrs: ['black', 'dark', 'coat', 'bag', 'large'], action: 'waiting', label: 'Person with a large dark bag waits near the rear entrance', path: [[296, 268], [340, 262]],
     conf: { semantic: 0.71, visual: 0.55 }, quality: { occlusion: 'medium', blur: 'low', lighting: 'low', angle: 'high' } },
 ];
 

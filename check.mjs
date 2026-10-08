@@ -48,6 +48,15 @@ await api.setSettings({ operator: { role: 'supervisor' } });
 await api.addAudit({ action: 'reveal', eventId: 'ev_091412', role: 'supervisor' });
 assert.equal((await api.getAudit()).length, 1);
 
+// §32-34 standing queries fire during replay, once per watch+event
+const fired = [];
+await api.live({ speed: 3600, tickMs: 0, onAlert: a => fired.push(a.id) });
+assert.deepEqual(fired.sort(), ['w_rear:ev_094105', 'w_van:ev_092630']);
+const again = []; await api.live({ speed: 3600, tickMs: 0, onAlert: a => again.push(a) });
+assert.equal(again.length, 0, 'no duplicate alerts on replay');
+assert.equal(api.matchWatch({ text: 'Anyone at the east dock', scope: 'all', from: '00:00', to: '23:59' }, api.event('ev_091412'), await api.getMemory()), null);
+assert.equal(api.inSchedule(api.sec('23:00:00'), { from: '20:00', to: '06:00' }), true);
+
 // server: persistence + validation + SSE stages
 const { start } = await import('./server.mjs');
 const { tmpdir } = await import('node:os');
@@ -62,6 +71,9 @@ const sse = await (await fetch(base + `search/${id}/events`)).text();
 assert.match(sse, /event: stage/); assert.match(sse, /event: result\ndata: .*"status":"supported"/);
 assert.equal((await call('audit', 'POST', { action: 'reveal', eventId: 'ev_091412' }))[0], 403, 'analyst cannot reveal');
 assert.equal((await call('settings', 'PUT', { privacy: { exports: 'leak' } }))[0], 400);
+assert.equal((await call('watches', 'POST', { text: 'x', scope: 'all', from: '25:00', to: '06:00' }))[0], 400, 'bad schedule rejected');
+const liveText = await (await fetch(base + 'live?speed=3600')).text();
+assert.match(liveText, /event: alert/); assert.match(liveText, /event: end/);
 srv.close();
 srv = await start(0, store);                                                         // restart: memory persists
 const mem = await (await fetch(`http://localhost:${srv.address().port}/api/memory`)).json();

@@ -61,6 +61,26 @@ function validSettings(b) {
   return out;
 }
 
+const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
+function validWatch(b, partial = false) {
+  const out = {};
+  if (!partial || 'text' in b) { if (typeof b.text !== 'string' || !b.text.trim() || b.text.length > 300) bad('text must be 1-300 characters'); out.text = b.text.trim(); }
+  if (!partial || 'scope' in b) { if (b.scope !== 'all' && !api.camera(b.scope)) bad('unknown scope'); out.scope = b.scope; }
+  for (const k of ['from', 'to']) if (!partial || k in b) { if (!HHMM.test(b[k])) bad(`${k} must be HH:MM`); out[k] = b[k]; }
+  if ('status' in b) { if (!['active', 'paused'].includes(b.status)) bad('status must be active or paused'); out.status = b.status; }
+  return out;
+}
+
+function liveStream(req, res, url) {
+  const speed = +(url.searchParams.get('speed') || 60), from = +(url.searchParams.get('from') || api.W[0]);
+  if (!(speed >= 1 && speed <= 3600) || !(from >= api.W[0] && from <= api.W[1])) throw new HttpError(400, 'speed 1-3600, from inside the recorded window');
+  res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
+  const ac = new AbortController(), send = (type, data) => res.write(`event: ${type}\ndata: ${JSON.stringify(data)}\n\n`);
+  req.on('close', () => ac.abort());
+  api.live({ speed, from, signal: ac.signal, onTick: d => send('tick', d), onEvent: d => send('event', d), onAlert: d => send('alert', d) })
+    .then(() => { send('end', {}); res.end(); }).catch(() => res.end());
+}
+
 const runs = new Map(); // search id -> { events, done, listeners, ac }
 function startSearch({ text, scope = 'all', context = null, depth }) {
   if (typeof text !== 'string' || !text.trim() || text.length > 500) bad('text must be 1-500 characters');
@@ -102,6 +122,11 @@ const routes = [
     if (b.action !== 'reveal' || !api.event(b.eventId)) bad('only reveal of a known eventId is audited');
     return api.addAudit({ action: 'reveal', eventId: b.eventId, role: (await api.getSettings()).operator.role }); // api enforces the role (403)
   }],
+  ['GET', /^watches$/, () => api.getWatches()],
+  ['POST', /^watches$/, async req => api.createWatch(validWatch(await body(req)))],
+  ['PUT', /^watches\/([\w-]+)$/, async (req, [id]) => { await api.updateWatch(id, validWatch(await body(req), true)); return { ok: true }; }],
+  ['DELETE', /^watches\/([\w-]+)$/, async (_, [id]) => { await api.deleteWatch(id); return { ok: true }; }],
+  ['GET', /^alerts$/, () => api.getAlerts()],
   ['POST', /^search$/, async req => ({ id: startSearch(await body(req)) })],
   ['DELETE', /^search\/(\w+)$/, (_, [id]) => { runs.get(id)?.ac.abort(); return { ok: true }; }],
 ];
@@ -133,6 +158,7 @@ export function start(port = 0, storeFile = join(root, '.store', 'store.json')) 
       if (!url.pathname.startsWith('/api/')) return serveStatic(res, url.pathname);
       const path = url.pathname.slice(5), m = path.match(/^search\/(\w+)\/events$/);
       if (m && req.method === 'GET') return sse(res, m[1]);
+      if (path === 'live' && req.method === 'GET') return liveStream(req, res, url);
       for (const [method, re, fn] of routes) {
         const hit = path.match(re);
         if (hit && method === req.method) {
