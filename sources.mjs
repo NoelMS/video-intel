@@ -2,7 +2,7 @@
 // archive, and any HLS/RTSP/MP4 URL. Feeds capture a clip on a schedule while the app is open; imports download archive
 // clips. Both hand files to the indexer, grouped per camera with a stable cameraKey.
 import { createHash } from 'node:crypto';
-import { createWriteStream, rmSync, statSync } from 'node:fs';
+import { createWriteStream, rmSync, statSync, mkdirSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawn } from 'node:child_process';
@@ -89,7 +89,7 @@ export const removeFeed = id => save('vi.feeds', listFeeds().filter(f => f.id !=
 export const MAX_BACKLOG = 12;   // captures pause while this many clips wait for the model, rather than queueing forever
 const capturing = new Set();
 async function tick() {
-  for (const f of listFeeds().filter(f => f.active && f.next <= Date.now() && !capturing.has(f.id))) {
+  for (const f of listFeeds().filter(f => f.active && !f.continuous && f.next <= Date.now() && !capturing.has(f.id))) {
     if (indexer.backlog().clips >= MAX_BACKLOG) { putFeed({ ...f, state: 'Paused while the indexing backlog clears', next: Date.now() + 60e3 }); continue; }
     captureFeed(f);
   }
@@ -111,7 +111,59 @@ export function captureNow(id, clipSec = null) {
   if (!capturing.has(id)) captureFeed(f, f.kind === 'stream' ? clipSec : null);
 }
 let timer = null;
-export const startScheduler = () => { timer ??= setInterval(tick, 15e3); timer.unref?.(); tick(); };
+export const startScheduler = () => { timer ??= setInterval(() => { tick(); recordContinuously(); }, 15e3); timer.unref?.(); tick(); recordContinuously(); };
+
+// ---------- continuous recording (stream cameras with `continuous`) ----------
+// One ffmpeg per camera cuts the stream into clipSec segments (stream copy, so it costs almost nothing); each finished
+// segment is queued for indexing as its own clip of that camera. Indexing a busy scene runs slower than real time on a
+// 4 GB GPU, so while the backlog is full, finished segments are dropped and counted (they show as coverage gaps).
+const recorders = new Map();   // feed id -> { proc, dir, dropped, queued, err }
+function recordContinuously() {
+  const feeds = listFeeds();
+  for (const f of feeds) {
+    const on = f.active && f.continuous && f.kind === 'stream', r = recorders.get(f.id);
+    if (on && !r) startRecorder(f);
+    else if (!on && r) stopRecorder(f.id);
+    else if (r) queueSegments(f, r);
+  }
+  for (const id of recorders.keys()) if (!feeds.some(f => f.id === id)) stopRecorder(id);
+}
+function startRecorder(f) {
+  const dir = join(tmpdir(), `vi-live-${f.id}`);
+  mkdirSync(dir, { recursive: true });   // kept across reconnects: finished segments still in it are queued as usual
+  // -nostdin: with no console to read, ffmpeg otherwise stops after a segment or two
+  const proc = spawn(setup.ffmpegPath(), ['-hide_banner', '-nostdin', '-loglevel', 'error', ...(f.url.startsWith('rtsp') ? ['-rtsp_transport', 'tcp'] : ['-rw_timeout', '20000000']), '-i', f.url,
+    '-map', '0:v:0', '-c', 'copy', '-f', 'segment', '-segment_time', String(f.clipSec), '-reset_timestamps', '1', '-strftime', '1', join(dir, '%Y%m%d_%H%M%S.mp4')],
+  { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
+  const r = { proc, dir, dropped: 0, queued: new Set(), err: '' };
+  proc.stderr.on('data', d => { r.err = (r.err + d).slice(-300); });
+  recorders.set(f.id, r);
+  proc.on('exit', () => {
+    if (recorders.get(f.id) !== r) return;
+    recorders.delete(f.id);
+    const cur = listFeeds().find(x => x.id === f.id);
+    if (cur?.active && cur.continuous) putFeed({ ...cur, state: 'Stream dropped; reconnecting', lastError: r.err.trim().split('\n').at(-1) || null });
+  });
+  putFeed({ ...f, state: `Recording continuously in ${f.clipSec} s segments` });
+}
+function stopRecorder(id) { const r = recorders.get(id); recorders.delete(id); r?.proc.kill(); if (r) setTimeout(() => rmSync(r.dir, { recursive: true, force: true }), 2000); }
+process.on('exit', () => { for (const r of recorders.values()) r.proc.kill(); });
+function queueSegments(f, r) {
+  const files = readdirSync(r.dir).filter(n => /^\d{8}_\d{6}\.mp4$/.test(n)).sort();
+  for (const n of files.slice(0, -1).filter(n => !r.queued.has(n))) {   // the newest file is still being written
+    const file = join(r.dir, n);
+    r.queued.add(n);
+    if (statSync(file).size < 1000) { rmSync(file, { force: true }); continue; }   // ffmpeg leaves an empty segment when a stream stalls
+    if (indexer.backlog().clips >= MAX_BACKLOG) { rmSync(file, { force: true }); r.dropped++; continue; }
+    // A segment ends when ffmpeg last wrote it, so it starts its length before that. (Its file name is when ffmpeg
+    // opened it, which is wrong for the burst of buffered video a live stream sends on connecting.)
+    const ended = statSync(file).mtimeMs;
+    indexer.probe(file).then(({ duration }) => indexer.addVideoFile(file, { name: f.name, location: f.location, tz: f.tz, cameraKey: f.cameraKey, neighbors: [], labels: [], ext: '.mp4',
+      source: { provider: f.provider, url: f.url }, start: new Date(ended - duration * 1000).toISOString() }))
+      .then(() => { const cur = listFeeds().find(x => x.id === f.id); if (cur) putFeed({ ...cur, captures: cur.captures + 1, last: new Date().toISOString(), lastError: null, state: `Recording continuously in ${f.clipSec} s segments${r.dropped ? ` · ${r.dropped} dropped while indexing caught up` : ''}` }); })
+      .catch(e => { rmSync(file, { force: true }); const cur = listFeeds().find(x => x.id === f.id); if (cur) putFeed({ ...cur, lastError: e.message }); });
+  }
+}
 
 const tmp = ext => join(tmpdir(), `vi-capture-${Date.now()}-${Math.random().toString(36).slice(2, 6)}${ext}`);
 const ffmpeg = (args, ms) => new Promise((res, rej) => {
@@ -173,7 +225,7 @@ async function runImports() {
     }
   } finally { importing = false; }
 }
-export const busy = () => importing || capturing.size > 0;
+export const busy = () => importing || capturing.size > 0 || recorders.size > 0;
 
 // MEVA selection -> import items (camera = the G-number, so each MEVA camera is one camera here).
 export const mevaItems = files => files.map(f => ({ url: MEVA + f.key, size: f.size, name: `MEVA ${f.camera}`, location: `${f.site} · Muscatatuck, Indiana`,

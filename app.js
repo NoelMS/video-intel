@@ -889,7 +889,14 @@ function pollVideos() {
   const tick = async () => {
     const readyBefore = S.videos.filter(v => v.status === 'ready').length;
     [S.videos, S.ingest] = await Promise.all([api.getVideos(), api.getIngest()]);
-    if (S.videos.filter(v => v.status === 'ready').length !== readyBefore && !ds().DEMO) { await loadDataset(); if (S.view !== 'cameras') render(); }
+    if (S.videos.filter(v => v.status === 'ready').length !== readyBefore && !ds().DEMO) {
+      await loadDataset();
+      // standing queries are checked on the server as each recording finishes indexing; say when one matched
+      const seen = new Set(S.alerts.map(a => a.id));
+      S.alerts = await api.getAlerts();
+      for (const a of S.alerts.filter(a => !seen.has(a.id))) toast(`Alert · ${a.watchText}`);
+      if (S.view !== 'cameras') render();
+    }
     if (S.view === 'cameras') $('#videos') ? ($('#videos').innerHTML = videosList()) : render();
     // keep polling while clips index, imports download, or live cameras capture
     if (S.videos.some(v => WORKING.includes(v.status)) || S.ingest.imports.some(i => ['queued', 'downloading'].includes(i.state)) || S.ingest.feeds.some(f => f.active || f.capturing)) videoPoll = setTimeout(tick, 3000);
@@ -964,13 +971,15 @@ function captureLayer({ id }) {
       <fieldset><legend class="eyebrow">SCHEDULE</legend>
         <label class="fld">Capture every<span class="row"><input type="number" name="every" min="2" max="1440" step="1" value="${f.intervalMin}" required> minutes</span></label>
         ${stream ? `<label class="opt"><input type="checkbox" name="keep" checked> <span>Record this long on every scheduled capture too (now ${f.clipSec} s)</span></label>` : ''}
+        ${stream ? `<label class="opt"><input type="checkbox" name="continuous" ${f.continuous ? 'checked' : ''}> <span>Record continuously instead, in segments of this length (indexing keeps up as far as this computer allows; the rest show as gaps)</span></label>` : ''}
       </fieldset>
       <div class="acts"><button class="btn primary">Capture now</button><button type="button" class="txt" data-act="close">Cancel</button></div>
     </form>`;
 }
 async function submitCapture(form) {
   const f = S.ingest.feeds.find(x => x.id === form.dataset.id), fd = new FormData(form), len = +fd.get('len') || null, every = +fd.get('every');
-  const patch = { ...(every !== f.intervalMin ? { intervalMin: every } : {}), ...(fd.get('keep') && len !== f.clipSec ? { clipSec: len } : {}) };
+  const cont = f.kind === 'stream' && !!fd.get('continuous');
+  const patch = { ...(every !== f.intervalMin ? { intervalMin: every } : {}), ...((fd.get('keep') || cont) && len !== f.clipSec ? { clipSec: len } : {}), ...(cont !== !!f.continuous ? { continuous: cont } : {}) };
   if (Object.keys(patch).length) await api.updateFeed(f.id, patch);
   S.ingest = await api.captureFeed(f.id, len);
   dlg.close(); render(); pollVideos();
@@ -983,7 +992,7 @@ function streamForm() {
     <label class="fld">Camera name<input name="name" required maxlength="80"></label>
     <label class="fld">Location<input name="location" maxlength="120"></label>
     <label class="fld">Timezone<input name="tz" list="tzs" value="${esc(Intl.DateTimeFormat().resolvedOptions().timeZone)}" required><datalist id="tzs">${TZS.map(t => `<option value="${t}">`).join('')}</datalist></label>
-    <div class="src-foot">${intervalPick()}<label class="mono">Clip length <select name="clipSec">${[15, 30, 60, 120].map(s => `<option ${s === 30 ? 'selected' : ''}>${s}</option>`).join('')}</select> s</label>
+    <div class="src-foot">${intervalPick()}<label class="mono">Clip length <select name="clipSec">${[15, 30, 60, 120].map(s => `<option ${s === 30 ? 'selected' : ''}>${s}</option>`).join('')}</select> s</label><label class="mono"><input type="checkbox" name="continuous"> Record continuously</label>
       <button class="btn primary">Add camera</button></div></form>`;
 }
 function mevaBrowser() {
@@ -1022,7 +1031,7 @@ async function submitStream(form) {
   const fd = new FormData(form), url = fd.get('url').trim();
   try {
     S.ingest = await api.addFeeds([{ name: fd.get('name').trim(), location: fd.get('location').trim(), tz: fd.get('tz').trim(), url, kind: /\.m3u8|^rtsp:/i.test(url) ? 'stream' : 'clip',
-      intervalMin: SRC.interval, clipSec: +fd.get('clipSec'), provider: 'url' }]);
+      intervalMin: SRC.interval, clipSec: +fd.get('clipSec'), continuous: !!fd.get('continuous') && /\.m3u8|^rtsp:/i.test(url), provider: 'url' }]);
     toast('Camera added'); dlg.close(); go('cameras'); pollVideos();
   } catch (e) { toast(e.message); }
 }
@@ -1046,7 +1055,7 @@ function ingestPanel() {
   return `${b.clips ? `<p class="backlog"><b>Indexing backlog</b> · ${b.clips} clip${b.clips === 1 ? '' : 's'} · ${hmsDur(b.seconds)} of footage${b.eta ? ` · up to ${hmsDur(b.eta)} at ${b.secPerFrame.toFixed(1)} s a frame (measured)` : ''}${b.clips >= ig.maxBacklog ? ' · live captures pause until it clears' : ''}</p>` : ''}
     ${ig.feeds.length ? `<section class="feeds"><p class="eyebrow">LIVE CAMERAS · capturing while the app is open</p><ol>${ig.feeds.map(f => `<li class="feed ${f.active ? '' : 'paused'}">
       ${f.image ? `<img loading="lazy" src="${esc(f.image)}" alt="">` : '<span class="noimg"></span>'}
-      <div><p class="cn">${esc(f.name)}</p><p class="mono dim">${esc(FEED_KIND[f.provider] || 'Stream')} · every ${f.intervalMin} min${f.kind === 'stream' ? ` for ${f.clipSec} s` : ''} · ${f.captures} capture${f.captures === 1 ? '' : 's'}</p>
+      <div><p class="cn">${esc(f.name)}</p><p class="mono dim">${esc(FEED_KIND[f.provider] || 'Stream')} · ${f.continuous ? `continuous, ${f.clipSec} s segments` : `every ${f.intervalMin} min${f.kind === 'stream' ? ` for ${f.clipSec} s` : ''}`} · ${f.captures} capture${f.captures === 1 ? '' : 's'}</p>
         <p class="mono ${f.lastError ? 'warn' : 'dim'}">${f.active ? esc(f.state) : 'Paused'}${f.last ? ` · last ${new Date(f.last).toLocaleTimeString('en-GB')}` : ''}${f.lastError ? ` · ${esc(f.lastError)}` : ''}</p></div>
       <div class="acts"><button class="txt" data-act="feed-capture" data-id="${f.id}" ${f.capturing ? 'disabled' : ''}>${f.capturing ? 'Capturing…' : 'Capture now'}</button><button class="txt" data-act="feed-toggle" data-id="${f.id}" data-on="${f.active ? 0 : 1}">${f.active ? 'Pause' : 'Resume'}</button><button class="txt danger" data-act="feed-del" data-id="${f.id}">Remove</button></div></li>`).join('')}</ol>
       <p class="attrib">${[...new Set(ig.feeds.map(f => ig.attribution[f.provider]).filter(Boolean))].join(' ')}</p></section>` : ''}

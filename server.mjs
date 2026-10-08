@@ -146,7 +146,7 @@ function validFeeds(b) {
     if (!(intervalMin >= 2 && intervalMin <= 1440)) bad('intervalMin must be 2-1440');
     if (!(clipSec >= 5 && clipSec <= 300)) bad('clipSec must be 5-300');
     return { name: str(i.name, 80, 'name'), location: str(i.location || 'Unspecified', 120, 'location'), tz: validTz(i.tz), url: i.url, kind: i.kind,
-      intervalMin, clipSec, provider: ['tfl', 'caltrans', 'url'].includes(i.provider) ? i.provider : 'url', image: /^https:\/\/\S+$/.test(i.image || '') ? i.image : null };
+      intervalMin, clipSec, continuous: i.continuous === true && i.kind === 'stream', provider: ['tfl', 'caltrans', 'url'].includes(i.provider) ? i.provider : 'url', image: /^https:\/\/\S+$/.test(i.image || '') ? i.image : null };
   });
 }
 function validImports(b) {
@@ -267,6 +267,7 @@ const routes = [
     if ('active' in b) { if (typeof b.active !== 'boolean') bad('active must be boolean'); patch.active = b.active; patch.state = b.active ? 'Resumed' : 'Paused'; }
     if ('intervalMin' in b) { if (!(+b.intervalMin >= 2 && +b.intervalMin <= 1440)) bad('intervalMin must be 2-1440'); patch.intervalMin = +b.intervalMin; }
     if ('clipSec' in b) patch.clipSec = validClipSec(b.clipSec);
+    if ('continuous' in b) { if (typeof b.continuous !== 'boolean') bad('continuous must be boolean'); patch.continuous = b.continuous; }
     sources.updateFeed(id, patch); return ingest();
   }],
   ['POST', /^feeds\/([\w-]+)\/capture$/, async (req, [id]) => { const b = await body(req); sources.captureNow(id, b.clipSec == null ? null : validClipSec(b.clipSec)); return ingest(); }],
@@ -330,8 +331,22 @@ function guard(req) {
 
 export const activity = { busy: () => !!setup.busy() || indexer.busy() || sources.busy() }; // idle exit waits for installs and indexing
 
+// Standing queries on real footage: each recording that finishes indexing (an upload, a live capture, an import) is
+// checked against every active watch, the same matching the replay uses. Alerts appear on the Live page.
+// Matched against the recordings' own dataset whatever is on screen (someone browsing the demo still gets alerts).
+async function alertOn(v) {
+  const refs = await api.getMemory(), watches = (await api.getWatches()).filter(w => w.status === 'active');
+  if (!watches.length) return;
+  const prev = api.ds(), hits = [];
+  api.useDataset(indexer.dataset());
+  try { for (const e of api.ds().events.filter(e => e.vid === v.id)) for (const w of watches) if (api.matchWatch(w, e, refs)) hits.push([w, e]); }
+  finally { api.useDataset(prev); }   // restored before any await, so no request sees the swap
+  for (const [w, e] of hits) await api.addAlert(w, e);
+}
+
 export function start(port = 0, storeFile = join(root, '.store', 'store.json'), host = '127.0.0.1') {
   api.useStorage(fileStore(storeFile));
+  indexer.configure({ onReady: v => alertOn(v).catch(e => console.warn('alerts:', e.message)) });
   indexer.useStorage(api.kv.load, api.kv.save);
   sources.useStorage(api.kv.load, api.kv.save);
   sources.startScheduler();

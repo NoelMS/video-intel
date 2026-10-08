@@ -189,6 +189,8 @@ if (ffmpegPath()) {
     .on('exit', c => c ? rej(new Error('ffmpeg test clip failed')) : res()));
   let k = 0;
   indexer.configure({ describe: async () => ({ objects: [{ ...person(0, 0, 100 + 20 * k++).objects[0] }], faces: [[10, 10, 20, 20]], plates: [], lighting: 'good' }) });
+  // a standing query set before the footage arrives fires when the recording finishes indexing
+  await fetch(b2 + 'watches', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text: 'man in a red jacket', scope: 'all', from: '00:00', to: '23:59' }) });
   const r = await fetch(b2 + 'videos?' + new URLSearchParams({ ...meta, filename: 'clip.mp4' }), { method: 'POST', headers: { 'content-type': 'video/mp4' }, body: (await import('node:fs')).readFileSync(clip) });
   assert.equal(r.status, 200, await r.clone().text());
   for (let i = 0; i < 100 && (await (await fetch(b2 + 'videos')).json())[0].status !== 'ready'; i++) await new Promise(res => setTimeout(res, 200));
@@ -204,6 +206,9 @@ if (ffmpegPath()) {
   const [, { id: sid }] = await (async () => { const x = await fetch(b2 + 'search', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text: 'Find the man in a red jacket', depth: 'fast' }) }); return [x.status, await x.json()]; })();
   assert.match(await (await fetch(b2 + `search/${sid}/events`)).text(), /"status":"supported"/, 'search runs over indexed footage');
   assert.ok(mine.events[0].dets.length > 1, 'events carry per-frame boxes for playback overlays');
+  let alerts = [];
+  for (let i = 0; i < 50 && !alerts.length; i++) { alerts = await (await fetch(b2 + 'alerts')).json(); if (!alerts.length) await new Promise(res => setTimeout(res, 100)); }
+  assert.ok(alerts.some(a => a.watchText === 'man in a red jacket' && a.eventId.startsWith(vid.id)), 'standing query alerts on newly indexed real footage');
   assert.ok(!existsSync(indexer.playFile(vid)), 'browser-playable H.264 source gets no copy');
   // H.265 (what most CCTV exports) gets an H.264 copy, served at /play; /file stays the untouched source
   const hevc = `${storeDir}/cctv.mkv`;

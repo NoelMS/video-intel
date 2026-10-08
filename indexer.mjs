@@ -106,7 +106,8 @@ function kick() {
   const next = listVideos().find(v => WORKING.includes(v.status));
   if (!next) return void backfillEmbeddings().catch(() => {});
   current = { id: next.id, cancelled: false };
-  index(next).catch(e => { const v = get(current.id); if (v) put({ ...v, status: 'failed', error: e.message }); })
+  index(next).then(() => { const v = get(next.id); if (v?.status === 'ready') opts.onReady?.(v); })
+    .catch(e => { const v = get(current.id); if (v) put({ ...v, status: 'failed', error: e.message }); })
     .finally(() => { current = null; kick(); });
 }
 export const resume = kick;
@@ -590,15 +591,32 @@ const tzLabel = (tz, at) => new Intl.DateTimeFormat('en', { timeZone: tz, timeZo
 
 // Possible re-identification across cameras: same entity type, shared colour/attribute words, later in time.
 // Links are only ever "possible"; the journey view says so.
+// With image embeddings, a link also needs the two crops to look alike (cosine >= REID_MIN) and the label's colours not
+// to contradict: shared label words alone linked every "white van" on one camera to every "white van" on the next.
+// The most similar earlier sighting wins. Without embeddings (vision-model-only indexing), shared words decide as before.
+export const REID_MIN = 0.8;
+const COLOURS = new Set(['black', 'white', 'grey', 'silver', 'red', 'blue', 'green', 'yellow', 'orange', 'brown', 'beige', 'purple', 'pink']);
+function crop(e) {
+  const em = e.vid && embeddings(e.vid), tk = +e.id.slice(e.id.lastIndexOf('_') + 1);
+  const i = em ? em.rows.findIndex(r => r.kind === 'track' && r.tk === tk) : -1;
+  return i >= 0 ? em.vec(i) : null;
+}
 function linkAcrossCameras(events, cameras) {
   const tsec = e => cameras.find(c => c.id === e.cameraId).t0 + e.t;
-  const sorted = [...events].sort((a, b) => tsec(a) - tsec(b));
+  const sorted = [...events].sort((a, b) => tsec(a) - tsec(b)), vec = new Map(sorted.map(e => [e, crop(e)]));
+  const colours = e => e.attrs.filter(a => COLOURS.has(a));
   for (const e of sorted) {
     const prev = sorted.filter(p => p.cameraId !== e.cameraId && p.entity === e.entity && tsec(p) < tsec(e) && tsec(e) - tsec(p) < 900)
-      .map(p => { const shared = p.attrs.filter(a => e.attrs.includes(a)); return [p, shared, shared.length / new Set([...p.attrs, ...e.attrs]).size]; })
-      .filter(([, sh, j]) => sh.length >= 2 && j >= 0.4).sort((a, b) => b[2] - a[2])[0];
+      .map(p => {
+        const shared = p.attrs.filter(a => e.attrs.includes(a)), jaccard = shared.length / new Set([...p.attrs, ...e.attrs]).size;
+        const [a, b] = [vec.get(p), vec.get(e)];
+        if (!a || !b) return [p, shared, jaccard, null, shared.length >= 2 && jaccard >= 0.4];
+        const cos = embed.cosine(a, b), clash = colours(p).length && colours(e).length && !colours(p).some(c => colours(e).includes(c));
+        return [p, shared, jaccard, cos, cos >= REID_MIN && !clash];
+      })
+      .filter(x => x[4]).sort((x, y) => (y[3] ?? y[2]) - (x[3] ?? x[2]))[0];
     if (prev && !sorted.some(o => o !== e && o.track === prev[0].track && o.cameraId === e.cameraId)) {
-      const old = e.track; e.track = prev[0].track; e.match = { shared: prev[1], jaccard: +prev[2].toFixed(2), from: old };
+      const old = e.track; e.track = prev[0].track; e.match = { shared: prev[1], jaccard: +prev[2].toFixed(2), ...(prev[3] != null ? { appearance: +prev[3].toFixed(3) } : {}), from: old };
     }
   }
 }

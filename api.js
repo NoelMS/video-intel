@@ -264,7 +264,7 @@ export async function createWatch(w) {
 export const updateWatch = async (id, patch) => save('vi.watches', (await getWatches()).map(w => w.id === id ? { ...w, ...patch } : w));
 export const deleteWatch = async id => save('vi.watches', (await getWatches()).filter(w => w.id !== id));
 export const getAlerts = async () => load('vi.alerts', []);
-async function addAlert(w, e) {
+export async function addAlert(w, e) {
   const all = load('vi.alerts', []), id = `${w.id}:${e.id}`;
   if (all.some(a => a.id === id)) return null; // one alert per watch and event, even across replays
   const row = { id, watchId: w.id, watchText: w.text, eventId: e.id, at: new Date().toISOString() };
