@@ -164,6 +164,23 @@ within 15 minutes) links rarely: 1 pair on the evaluation footage. Links are alw
 re-identification accuracy needs cross-camera identity labels, which our evaluation set does not have; this is the main
 open item.
 
+**Within one camera it can be measured.** MEVA publishes per-frame boxes with an actor id for every person taking part in
+an annotated activity (`geom.yml`). `eval/identity.mjs` samples those boxes at our 5 fps frames and checks whether one
+of our boxes overlaps (IoU >= 0.5) and whether the person keeps one track (`eval/results-identity.md`):
+
+| Cameras | People found | Detected person-frames | Identity recall | Identity precision | Our tracks per person |
+|---|---|---|---|---|---|
+| Near field (G505, G508, G419, G420) | 71 of 72 | 64.6-90.9% | 52.4-63.3% | 64.8-81.1% | 1.20-1.82 |
+| Crowded bus shelter (G506) | 69 of 97 | 37.2% | 15.0% | 40.2% | 1.64 |
+| Far field (G328, G339, G509) | 7 of 165 | 0-10% | 0-8% | - | - |
+
+- **Far field is a detection problem, not a tracking one.** People on G328 and G339 are ~10 px tall in our 640 px
+  detector frames (median; 41 px on G505). The detector cannot see them, which is also why queries about those cameras
+  fail. Tiling or a higher detector resolution on wide views would fix it at 2-4x the indexing cost.
+- **Stitching fragments did not help.** Re-joining a track to an earlier one on the same camera (gap <= 8 s, nearby,
+  shared colour, crop cosine >= 0.8-0.9, mutual best) left G506 unchanged at every setting and lowered identity recall
+  on G505 from 57.6% to 52.7-55.0%: the crops that look alike at the bus shelter are mostly different people. Not kept.
+
 ## Bonus items
 
 - **Live ingestion:** about 890 London (TfL) cameras and California (Caltrans) cameras in all 12 districts, or any HLS/RTSP URL. Each camera is captured
@@ -181,7 +198,8 @@ open item.
 - Attribute queries were labelled by one person from 10 s (MEVA) or 0.5 s (TfL) contact sheets, with spans widened
   ~5 s for MEVA.
 - The baseline uses our own query parsing (phrase extraction), which helps it; a raw-question baseline would score lower.
-- Re-identification precision and recall are not measured (no identity labels).
+- Cross-camera re-identification accuracy is not measured (no cross-camera identity labels); within-camera identity is
+  (above). Far-away people (~10 px) are not detected.
 - Indexing runs slower than real time on a 4 GB GPU.
 
 ## Reproduce
