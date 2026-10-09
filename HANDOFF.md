@@ -375,6 +375,8 @@ ES modules need an http origin. Opening `index.html` from disk will not work.
     - The vision checks are now sent together (`Promise.all` in `search`). On this GPU Ollama still answers one at a time (~0.4-1.3 s each), so median deep latency went 5.7 s → 4.4 s. `fullGpu` (indexer.mjs) switches off for the server's life after one out-of-memory error; competing Ollama clients slow every check ~2.5x.
     - Tried and dropped: lowering the candidate gate (`pass` 0.75 → 0.6/0.5) changed nothing on dev. "Find the person carrying a white bag" misses because the label says "carrying a bag" with no bag colour; fixing it needs a naming-prompt change and a re-index.
     - "Walking across the car park" still asks where the car park is, which is the intended clarify-once behaviour, scored as a miss.
+  - **Rounds 2-3** (verification experiments, all reverted after dev runs; listed in WRITEUP "What did not work"): three frames per check (Hit@1 59.1% → 45.5% on dev, 2.8x slower), the frame at the best-matching moment (→ 50.0%), and a 6-word reason (one answer flipped, no speed-up).
+    - Kept: `eval.mjs` has a `balanced` variant (`depth` per variant). Depth table on all 43: Fast 34.9% / 74.4% / 93 ms, Balanced 37.2% / 74.4% / 2.3 s, Deep 44.2% / 79.1% / 4.4 s, baseline 30.2% / 46.5% / 25 ms. It is in WRITEUP (Latency) and the README table. `results-all.md` has the Balanced row (no per-query column for it).
 
 ## Footage sources (researched)
 

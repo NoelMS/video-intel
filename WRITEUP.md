@@ -117,13 +117,29 @@ word the app asks about; the final-code rows are measured on the reworded set.
 - **Where it does not help:** for simple appearance queries ("red double-decker bus", "white SUV") whole-frame
   retrieval is already strong and slightly better at Hit@1 (ours is better at Hit@5). Our gains are on activities and moments, which is where
   CCTV questions are hard.
+- **What did not work** (dev split, 22 queries; full pipeline Hit@1 59.1%):
+  - Showing the verifier three frames 1.5 s apart, so it could see an action happen: Hit@1 45.5%, 2.8x slower. The 2B
+    model judges a sequence worse than one clear still.
+  - Verifying the frame at the object's best-matching moment instead of its representative (largest) sighting: 50.0%.
+  - Lowering the candidate gate (`pass` 0.75 to 0.6 or 0.5): no change.
+  - Asking for a shorter reason (6 words, not 12): one answer flipped, no measurable speed-up. Any prompt change moves
+    the model's answers, so prompts are only changed with a dev run.
 
 ### Latency
 
-The baseline answers in ~11 ms (one text embedding and a dot product per indexed second). Ours answers in ~90 ms
-without verification and ~4.4 s with the vision model's check of up to 6 candidates (the evaluation runs at Deep depth).
-In the app, Fast depth skips the check, Balanced checks the top 3 and Deep the top 6. Indexing is the slow part: 5 fps detection plus naming runs at roughly 2.5-4x real time
-on busy footage on this 4 GB GPU.
+The baseline answers in ~25 ms (one text embedding and a dot product per indexed second). The app's three depths, all
+43 queries:
+
+| Depth | What it does | Hit@1 | Hit@5 | MRR | Median latency |
+|---|---|---|---|---|---|
+| Baseline | CLIP frames | 30.2% | 46.5% | 0.363 | 25 ms |
+| Fast | ranking only, no vision-model check | 34.9% | 74.4% | 0.501 | 93 ms |
+| Balanced (app default) | checks the top 3 | 37.2% | 74.4% | 0.507 | 2.3 s |
+| Deep | checks the top 6 | **44.2%** | **79.1%** | **0.567** | 4.4 s |
+
+Fast already beats the baseline by 28 points at Hit@5 for ~70 ms more. The checks are sent together, but on this 4 GB
+GPU Ollama answers them one at a time (~0.4-1.3 s each). Indexing is the slow part: 5 fps detection plus naming runs at
+roughly 2.5-4x real time on busy footage on this GPU.
 
 ## Clarify once, then remember
 

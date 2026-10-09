@@ -23,6 +23,7 @@ const VARIANTS = {
   hybrid: { label: 'Ours: + label words (objects + labels)', ablation: { frames: false, verify: false } },
   moments: { label: 'Ours: + frame context and moment per object', ablation: { verify: false } },
   verified: { label: 'Ours: + vision-model verification (full)', ablation: {} },
+  balanced: { label: 'Ours: full at Balanced depth (checks the top 3, not 6)', ablation: {}, depth: 'balanced' },
 };
 // --weights '{"frame":0.2}' sets ranking weights for our variants (tuning on the dev split only)
 const WEIGHTS = JSON.parse(arg('weights', '{}'));
@@ -45,8 +46,8 @@ const dayOf = q => days.find(d => q.answers.some(a => d.cams.has(a.camera)));
 let camName = {}, events = {};
 const at = (vid, vt) => Date.parse(vids[vid].start) + vt * 1000;   // absolute time of a moment in a clip
 
-async function ours(text, ablation) {
-  const t0 = Date.now(), { id } = await post('search', { text, depth: 'deep', ablation });
+async function ours(text, ablation, depth = 'deep') {
+  const t0 = Date.now(), { id } = await post('search', { text, depth, ablation });
   const raw = await (await fetch(BASE + `search/${id}/events`)).text(), ms = Date.now() - t0;
   const block = raw.split('\n\n').map(b => b.split('\n')).find(l => l[0] === 'event: result' || l[0] === 'event: fail');
   if (!block || block[0] === 'event: fail') return { ms, list: [] };
@@ -73,7 +74,7 @@ for (const v of chosen) {
     const d = dayOf(q);
     if (!d) { console.log(`skipped (no indexed camera holds its answers): ${q.text}`); continue; }
     if (d.day !== days.current) { await put({ day: d.day }); days.current = d.day; ({ camName, events } = d); }
-    const r = v === 'baseline' ? await base(q.text) : await ours(q.text, VARIANTS[v].ablation);
+    const r = v === 'baseline' ? await base(q.text) : await ours(q.text, VARIANTS[v].ablation, VARIANTS[v].depth);
     const k = hitAt(r.list, q, TOL), ks = hitAt(r.list, q, 2);
     m.hit1 += k === 0; m.hit5 += k >= 0 && k < 5; m.rr += k >= 0 ? 1 / (k + 1) : 0; m.strict1 += ks === 0; m.ms.push(r.ms);
     const top = r.list[0];

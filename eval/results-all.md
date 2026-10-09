@@ -10,6 +10,7 @@ Hit = right camera and a time within the answer span +-5 s (strict: +-2 s). Foot
 | Ours: + label words (objects + labels) | 34.9% | 69.8% | 0.494 | 32.6% | 58.1% | 1.2 | 93 | 110 |
 | Ours: + frame context and moment per object | 34.9% | 74.4% | 0.501 | 34.9% | 58.1% | 0.0 | 93 | 109 |
 | Ours: + vision-model verification (full) | 44.2% | 79.1% | 0.567 | 41.9% | 69.8% | 0.3 | 4420 | 7480 |
+| Ours: full at Balanced depth (checks the top 3, not 6) | 37.2% | 74.4% | 0.507 | 37.2% | 67.4% | 0.5 | 2314 | 3903 |
 
 <details><summary>Per query (rank of the first hit, -1 = none in the top 10; top result)</summary>
 
