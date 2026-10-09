@@ -147,7 +147,7 @@ function interpretation() {
   if (!q) return '';
   const rows = [];
   if (q.follow) rows.push(['FOLLOWING', `${esc(ds().tracks[q.follow.track])} · ${q.follow.track}`]);
-  if (q.entity) rows.push(['ENTITY', q.entity]);
+  if (q.entity) rows.push(['ENTITY', q.kind ? `${esc(q.kind.name)} · ${q.entity}` : q.entity]);
   if (q.attrs.length) rows.push(['ATTRIBUTE', q.attrs.join(' · ')]);
   if (q.location) rows.push(['LOCATION', q.location.ref ? referentChip(q.location.ref) : `${esc(q.location.term)} <span class="warn mono">UNDEFINED</span>`]);
   rows.push(['EVENT', q.intent === 'journey' ? 'movement across cameras' : q.intent === 'activity' ? 'any activity' : q.crossing ? 'crossing / entering' : 'presence']);
@@ -159,7 +159,7 @@ function interpretation() {
 }
 
 const referentChip = r => `<details class="refchip"><summary>${esc(r.name)} <span class="mono dim">${cam(r.cameraId).code} · saved visual referent</span></summary>
-  ${frame(r.cameraId, { region: { rect: r.region, name: r.name }, time: hms(W[0]) })}
+  ${frame(r.cameraId, { region: { rect: r.region, shape: r.shape, name: r.name }, time: hms(W[0]) })}
   <p class="mono dim">Defined by ${esc(r.definedBy)} · ${fmtDate(r.created)} · used in ${r.uses} searches</p></details>`;
 
 const STAGES = [['interpreted', 'Interpret', ''], ['retrieval', 'Fast retrieval', 'FAST'], ['semantic', 'Semantic match', 'FAST'], ['temporal', 'Temporal filter', 'PRECISE'],
@@ -210,7 +210,7 @@ function supported(r) {
     <header class="answer"><p class="verdict" tabindex="-1">${q.yesNo ? 'YES' : 'SUPPORTED RESULT'}</p>
       <h2 class="claim">${esc(claim)} ${evRef(e)}</h2></header>
     <figure class="lead" data-act="open" data-id="${e.id}" tabindex="0" role="button" aria-label="Open evidence ${c.code} ${e.time}">
-      ${still(e, { trail: true, region: ref?.cameraId === e.cameraId ? { rect: ref.region, name: ref.name } : null })}
+      ${still(e, { trail: true, region: ref?.cameraId === e.cameraId ? { rect: ref.region, shape: ref.shape, name: ref.name } : null })}
       <figcaption class="mono"><span>${c.code} · ${c.name.toUpperCase()}</span><span>${e.time} ${ds().TZ}</span><span>Open evidence ↵</span></figcaption>
     </figure>
     ${fp(e)}
@@ -223,14 +223,14 @@ function supported(r) {
 function ambiguous(r) {
   return `<article class="result">
     <header class="answer"><p class="verdict amb" tabindex="-1">${r.candidates.length + (r.more?.length || 0)} PLAUSIBLE MATCHES</p>
-      <h2 class="claim">The footage does not single out one ${r.interp.entity || 'candidate'}. Compare before concluding.</h2></header>
+      <h2 class="claim">The footage does not single out one ${esc(r.interp.kind?.name || r.interp.entity || 'candidate')}. Compare before concluding.</h2></header>
     ${compareGrid(r.candidates, r.interp)}${moreMatches(r.more)}${negative(r)}
     ${timeline({ hits: new Set([...r.candidates, ...(r.more || [])]), focus: ev(r.candidates[0]) })}${coverage(r)}
   </article>`;
 }
 
 function refusal(r) {
-  const q = r.interp, ref = q.location?.ref, what = [...q.attrs, ...(q.attrs.some(a => ['sedan', 'van', 'suv', 'hatchback'].includes(a)) ? [] : [q.entity || 'object'])].join(' ').replace('suv', 'SUV');
+  const q = r.interp, ref = q.location?.ref, what = [...q.attrs, q.kind?.name || q.entity || 'object'].join(' ');
   const missing = [...new Set(r.rejected.flatMap(x => x.checks.filter(c => !c.ok).map(c => c.text)))];
   return `<article class="result">
     <header class="answer"><p class="verdict ins" tabindex="-1">CANNOT DETERMINE</p>
@@ -301,7 +301,7 @@ function evidenceStack(e, q) {
   const layers = [
     ['VISUAL', 'What does it look like?', A['Visual match'], `${esc(e.label)}. Attributes: ${e.attrs.join(', ')}. Semantic match ${lv(A['Semantic match'])}`],
     ['TEMPORAL', 'When did it occur?', A['Temporal fit'], `<span class="mono">${e.time} ${ds().TZ}</span>. Clip ${hms(sec(e.time) - 8)} → ${hms(sec(e.time) + 8)}. Camera clock offset ${fmtSync(c.sync)}.`],
-    ['SPATIAL', 'Where did it occur?', A['Location fit'], `${c.code} ${c.name}.${ref ? ` Trajectory ${api.pathHits(e, ref.region) ? 'intersects' : 'does not intersect'} the ${esc(ref.name)} region.` : ''}`],
+    ['SPATIAL', 'Where did it occur?', A['Location fit'], `${c.code} ${c.name}.${ref ? ` Trajectory ${api.pathHits(e, ref.region, ref.shape) ? 'intersects' : 'does not intersect'} the ${esc(ref.name)} region.` : ''}`],
     ['IDENTITY', 'Is it the same entity?', A['Cross-camera link'], `Track ${tid(e.track)}, ${j.sightings.length} sighting${j.sightings.length > 1 ? 's' : ''} on ${new Set(j.sightings.map(id => ev(id).cameraId)).size} camera(s). <button class="txt" data-act="passport" data-track="${e.track}">Object passport</button>`],
     ['SEQUENCE', 'What happened before and after?', 'N/A', `Before: ${prev ? evRef(prev) + ' ' + esc(prev.label) : 'no earlier sighting'}<br>After: ${next ? evRef(next) + ' ' + esc(next.label) : 'no later sighting'}`],
   ];
@@ -451,10 +451,10 @@ function memoryView() {
     <p class="lede">Places defined once and resolved in every query that names them. ${memHere().length} referent${memHere().length === 1 ? '' : 's'} on these cameras.</p>
     <button class="btn" data-act="define">Define a referent</button></header>
     <ol class="refs">${memHere().map(r => { const c = cam(r.cameraId); return `<li class="ref-item">
-      <figure>${frame(r.cameraId, { region: { rect: r.region, name: r.name }, time: hms(W[0]) })}</figure>
+      <figure>${frame(r.cameraId, { region: { rect: r.region, shape: r.shape, name: r.name }, time: hms(W[0]) })}</figure>
       <div><h2>${esc(r.name)}</h2><p class="mono dim">${c.code} · ${c.name} · saved region</p>
       <dl class="kv"><div><dt>Defined by</dt><dd>${esc(r.definedBy)}</dd></div><div><dt>Source</dt><dd>${c.code}</dd></div>
-        <div><dt>Region</dt><dd class="mono">x ${r.region[0]} · y ${r.region[1]} · w ${r.region[2]} · h ${r.region[3]}</dd></div>
+        <div><dt>Region</dt><dd class="mono">${r.shape?.length ? `free form · ${r.shape.length} points · within ` : ''}x ${r.region[0]} · y ${r.region[1]} · w ${r.region[2]} · h ${r.region[3]}</dd></div>
         <div><dt>Created</dt><dd>${fmtDate(r.created)}</dd></div><div><dt>Last used</dt><dd>${r.lastUsed ? fmtDate(r.lastUsed) : 'never'}</dd></div>
         <div><dt>Used in</dt><dd>${r.uses} search${r.uses === 1 ? '' : 'es'}</dd></div>${r.aliases?.length ? `<div><dt>Also called</dt><dd>${r.aliases.map(esc).join(', ')}</dd></div>` : ''}</dl>
       <div class="acts"><button class="txt" data-act="ask" data-q="What happened near the ${esc(r.name.toLowerCase())}?">Search here</button>
@@ -508,7 +508,7 @@ function investigationView() {
 
 // ---------- referent resolver (inline for clarification, layer for memory) ----------
 function resolver(R) {
-  const c = R.cameraId && cam(R.cameraId);
+  const c = R.cameraId && cam(R.cameraId), free = R.mode === 'free';
   return `<section class="resolver" aria-labelledby="res-h">
     ${R.inline ? `<p class="verdict" tabindex="-1">ONE DETAIL NEEDED</p><h2 class="claim" id="res-h">I need one detail before I search. “${esc(R.term)}” has not been defined yet.</h2>
       <p class="lede">Select the camera that shows it, then drag over the area. It is saved once and resolved in every later query.</p>`
@@ -516,18 +516,30 @@ function resolver(R) {
       <h2 class="claim" id="res-h">${R.id ? esc(R.name) : 'A place the system should remember'}</h2>`}
     <ol class="res-cams" aria-label="Choose camera">${cams.filter(x => x.status !== 'offline').map(x => `<li><button data-act="res-cam" data-id="${x.id}" aria-pressed="${R.cameraId === x.id}">
       ${frame(x.id, { time: hms(W[0]) })}<span class="mono">${x.code}</span> ${x.name}</button></li>`).join('')}</ol>
-    ${c ? `<div class="res-draw"><p class="mono dim">${c.code} · ${c.name.toUpperCase()} · drag to select the area, or type the region</p>
+    ${c ? `<div class="res-draw"><div class="res-top"><p class="mono dim">${c.code} · ${c.name.toUpperCase()} · ${free ? 'hold and draw around the area; let go to close it' : 'drag to select the area, or type the region'}</p>
+        <span class="mode" role="group" aria-label="Area shape">${[['rect', 'Rectangle'], ['free', 'Free form']].map(([m, l]) => `<button data-act="res-mode" data-m="${m}" aria-pressed="${(m === 'free') === free}">${l}</button>`).join('')}</span></div>
       <div class="res-canvas" data-draw>${frame(c.id, { time: hms(W[0]) })}
-        <svg class="res-ov" viewBox="0 0 640 360" preserveAspectRatio="none" aria-hidden="true"><rect id="res-rect" ${R.rect ? `x="${R.rect[0]}" y="${R.rect[1]}" width="${R.rect[2]}" height="${R.rect[3]}"` : ''}/></svg></div>
+        <svg class="res-ov" viewBox="0 0 640 360" preserveAspectRatio="none" aria-hidden="true"><rect id="res-rect" ${!free && R.rect ? `x="${R.rect[0]}" y="${R.rect[1]}" width="${R.rect[2]}" height="${R.rect[3]}"` : ''}/><polygon id="res-poly" points="${free && R.shape ? R.shape.map(p => p.join(',')).join(' ') : ''}"/></svg></div>
       <div class="res-form">
-        <fieldset><legend class="mono">REGION (frame px)</legend>${['x', 'y', 'w', 'h'].map((k, i) => `<label class="mono">${k} <input type="number" min="0" max="${i % 2 ? 360 : 640}" data-xywh="${i}" value="${R.rect?.[i] ?? ''}"></label>`).join('')}</fieldset>
+        ${free ? `<p class="mono dim" id="res-pts">${shapeNote(R)}</p>` : `<fieldset><legend class="mono">REGION (frame px)</legend>${['x', 'y', 'w', 'h'].map((k, i) => `<label class="mono">${k} <input type="number" min="0" max="${i % 2 ? 360 : 640}" data-xywh="${i}" value="${R.rect?.[i] ?? ''}"></label>`).join('')}</fieldset>`}
         <label class="res-name">Name <input id="res-name" value="${esc(R.name)}" required></label>
-        <button class="btn primary" data-act="save-ref" ${R.rect?.[2] > 4 && R.rect?.[3] > 4 ? '' : 'disabled'}>Save referent</button></div></div>` : ''}
+        <button class="btn primary" data-act="save-ref" ${canSave(R) ? '' : 'disabled'}>Save referent</button></div></div>` : ''}
   </section>`;
 }
 
+// The area is a rectangle, or a free-form outline whose bounding box is kept as the rectangle.
+const canSave = R => R.mode === 'free' ? R.shape?.length >= 3 && R.rect?.[2] >= 4 && R.rect?.[3] >= 4 : R.rect?.[2] > 4 && R.rect?.[3] > 4;
+const shapeNote = R => R.shape?.length >= 3 ? `Outline · ${R.shape.length} points · within x ${R.rect[0]} · y ${R.rect[1]} · w ${R.rect[2]} · h ${R.rect[3]}` : 'No outline yet';
+function setShape(pts) {
+  const R = S.resolver, xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
+  R.shape = pts; R.rect = pts.length ? [Math.min(...xs), Math.min(...ys), Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)] : null;
+  $('#res-poly')?.setAttribute('points', pts.map(p => p.join(',')).join(' '));
+  if ($('#res-pts')) $('#res-pts').textContent = shapeNote(R);
+  const b = $('[data-act=save-ref]');
+  if (b) b.disabled = !canSave(R);
+}
 function setRect(r) {
-  S.resolver.rect = r;
+  S.resolver.rect = r; S.resolver.shape = null;
   const el = $('#res-rect');
   if (el) ['x', 'y', 'width', 'height'].forEach((k, i) => el.setAttribute(k, r[i]));
   $$('[data-xywh]').forEach(inp => { if (inp !== document.activeElement) inp.value = r[inp.dataset.xywh]; });
@@ -535,14 +547,15 @@ function setRect(r) {
   if (b) b.disabled = !(r[2] > 4 && r[3] > 4);
 }
 
-const openResolver = R => { S.resolver = { name: '', cameraId: null, rect: null, ...R, inline: false }; openLayer({ kind: 'resolver' }); };
+const openResolver = R => { S.resolver = { name: '', cameraId: null, rect: null, shape: null, mode: R.shape?.length ? 'free' : 'rect', ...R, inline: false }; openLayer({ kind: 'resolver' }); };
 
 async function saveRef() {
   const R = S.resolver, nm = $('#res-name').value.trim();
   if (!nm) return $('#res-name').focus();
   const aliases = R.term && !nm.toLowerCase().includes(R.term.toLowerCase()) ? [R.term] : undefined;
-  if (R.id) await api.updateMemory(R.id, { name: nm, cameraId: R.cameraId, region: R.rect });
-  else await api.createMemory({ name: nm, cameraId: R.cameraId, region: R.rect, aliases });
+  const area = { region: R.rect, shape: R.mode === 'free' ? R.shape : null };
+  if (R.id) await api.updateMemory(R.id, { name: nm, cameraId: R.cameraId, ...area });
+  else await api.createMemory({ name: nm, cameraId: R.cameraId, ...area, aliases });
   S.memory = await api.getMemory();
   toast(`Remembered · ${nm.toUpperCase()} · ${cam(R.cameraId).code}`);
   S.resolver = null;
@@ -616,7 +629,7 @@ function evidenceLayer({ id, off = 0, focus = false }) {
 
 function evFrame() {
   const e = ev(P.id);
-  return still(e, { offset: P.off, box: P.box, trail: P.trail, region: P.region && P.ref ? { rect: P.ref.region, name: P.ref.name } : null });
+  return still(e, { offset: P.off, box: P.box, trail: P.trail, region: P.region && P.ref ? { rect: P.ref.region, shape: P.ref.shape, name: P.ref.name } : null });
 }
 function drawFrame() {
   const f = $('#evf'); if (!f || ev(P.id).clip) return;
@@ -1302,7 +1315,7 @@ function diagLayer() {
     <div class="diag-grid">
       <section><p class="eyebrow">QUERY</p><dl class="kv">
         <div><dt>Text</dt><dd>${esc(q.text)}</dd></div>
-        <div><dt>Interpretation</dt><dd class="mono">${esc(JSON.stringify({ entity: q.entity, attrs: q.attrs, location: q.location?.term ?? null, intent: q.intent, crossing: q.crossing, follow: q.follow?.track ?? null }))}</dd></div>
+        <div><dt>Interpretation</dt><dd class="mono">${esc(JSON.stringify({ entity: q.entity, kind: q.kind?.name ?? null, attrs: q.attrs, location: q.location?.term ?? null, intent: q.intent, crossing: q.crossing, follow: q.follow?.track ?? null }))}</dd></div>
         <div><dt>Window</dt><dd class="mono">${hm(r.window[0])} → ${hm(r.window[1])} ${ds().TZ}</dd></div>
         <div><dt>Pipeline</dt><dd class="mono">${Object.entries(d.pipeline).map(([k, v]) => `${k}=${esc(v)}`).join(' · ')}</dd></div></dl></section>
       <section><p class="eyebrow">SEARCH COST</p><dl class="kv">
@@ -1619,13 +1632,14 @@ const ACT = {
   camera: d => { S.camFocus = d.id; go('cameras', () => $('#row-' + d.id)?.scrollIntoView({ block: 'center' })); },
   scope: d => { S.scope = d.id; go('search', focusQ); },
   define: () => openResolver({}),
-  redefine: d => { const r = S.memory.find(x => x.id === d.id); openResolver({ id: r.id, name: r.name, cameraId: r.cameraId, rect: [...r.region] }); },
+  redefine: d => { const r = S.memory.find(x => x.id === d.id); openResolver({ id: r.id, name: r.name, cameraId: r.cameraId, rect: [...r.region], shape: r.shape ?? null }); },
   forget: async d => {
     const r = S.memory.find(x => x.id === d.id);
     if (!confirm(`Forget “${r.name}”? Queries that name it will ask again.`)) return;
     await api.deleteMemory(d.id); S.memory = await api.getMemory(); render(); toast(`Forgot ${r.name}`);
   },
-  'res-cam': d => { keepName(); Object.assign(S.resolver, { cameraId: d.id, rect: null }); redrawResolver(); },
+  'res-cam': d => { keepName(); Object.assign(S.resolver, { cameraId: d.id, rect: null, shape: null }); redrawResolver(); },
+  'res-mode': d => { keepName(); if ((S.resolver.mode ?? 'rect') !== d.m) Object.assign(S.resolver, { mode: d.m, rect: null, shape: null }); redrawResolver(); },
   'save-ref': saveRef,
   play: togglePlay, step: d => stepBy(+d.d), seek: d => { stopPlay(); P.off = +d.off; drawFrame(); },
   focusmode: (d, b) => { S.layer.focus = !S.layer.focus; $('.ev').classList.toggle('focus', S.layer.focus); b.setAttribute('aria-pressed', S.layer.focus); },
@@ -1712,6 +1726,14 @@ document.addEventListener('pointerdown', e => {
   const box = cv.getBoundingClientRect();
   const pt = m => [clamp(Math.round((m.clientX - box.left) / box.width * 640), 0, 640), clamp(Math.round((m.clientY - box.top) / box.height * 360), 0, 360)];
   const [x0, y0] = pt(e);
+  if (S.resolver?.mode === 'free') {   // freehand: a point every 4 px of travel, at most 200; let go to close the outline
+    const pts = [[x0, y0]];
+    setShape(pts);
+    const move = m => { const p = pt(m), q = pts.at(-1); if (Math.hypot(p[0] - q[0], p[1] - q[1]) >= 4) { pts.push(p); setShape(pts); } };
+    const up = () => { removeEventListener('pointermove', move); removeEventListener('pointerup', up); setShape(pts.length > 200 ? pts.filter((_, i) => i % Math.ceil(pts.length / 200) === 0) : pts); };
+    addEventListener('pointermove', move); addEventListener('pointerup', up);
+    return;
+  }
   const move = m => { const [x1, y1] = pt(m); setRect([Math.min(x0, x1), Math.min(y0, y1), Math.abs(x1 - x0), Math.abs(y1 - y0)]); };
   const up = () => { removeEventListener('pointermove', move); removeEventListener('pointerup', up); };
   addEventListener('pointermove', move); addEventListener('pointerup', up);

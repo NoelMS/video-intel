@@ -62,6 +62,23 @@ assert.equal(api.interpret('What happened after 9:40?', []).intent, 'activity');
 // a clip starting 5 s late is not an unsearched gap; one starting a minute late is
 assert.equal(api.coverageGaps([{ id: 'c', coverage: [['10:00:05', '10:05:00']] }], [36000, 36300]).length, 0);
 assert.equal(api.coverageGaps([{ id: 'c', coverage: [['10:01:00', '10:05:00']] }], [36000, 36300]).length, 1);
+// the kind of vehicle is kept: a red truck is not any red vehicle; a car park is a place, not a car
+assert.equal(api.interpret('Find a red truck', []).kind.name, 'truck');
+assert.equal(api.interpret('Find a white pickup truck', []).kind.name, 'pickup');
+assert.equal(api.interpret('Find a lorry', []).kind.name, 'truck');
+assert.equal(api.interpret('Find the scooter rider in a white helmet', []).entity, 'person');
+assert.equal(api.interpret('Find the people walking across the car park', []).kind, null);
+{ const q = api.interpret('Find a red truck', []), ev = (label, attrs) => ({ entity: 'vehicle', attrs, time: '10:00:00' });
+  assert.equal(api.checks(ev('Red car', ['red', 'car']), q, [0, 86400]).find(c => c.text === 'Kind · truck').ok, false);
+  assert.equal(api.checks(ev('Red lorry', ['red', 'lorry']), q, [0, 86400]).every(c => c.ok), true);
+  assert.equal(api.checks(ev('Red saloon', ['red', 'saloon']), api.interpret('Find a red car', []), [0, 86400]).every(c => c.ok), true); }
+// a free-form area: a path through the corner of its bounding box that misses the outline is not a crossing
+{ const tri = [[100, 100], [300, 100], [100, 300]], box = [100, 100, 200, 200];
+  assert.equal(api.inside([150, 150], box, tri), true);
+  assert.equal(api.inside([280, 280], box, tri), false);
+  assert.equal(api.inside([280, 280], box), true);
+  assert.equal(api.pathHits({ path: [[290, 250], [250, 290]] }, box, tri), false);
+  assert.equal(api.pathHits({ path: [[50, 150], [250, 150]] }, box, tri), true); }
 // a vehicle named anywhere is the search target (measured: see interpret)
 assert.equal(api.interpret('Find a person getting out of a car', []).entity, 'vehicle');
 // a specific place is asked about; "the door of a building" is any door

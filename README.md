@@ -30,8 +30,8 @@ against a standard CLIP frame-retrieval baseline on the same footage:
 | | Hit@1 | Hit@5 | MRR | Median time error | Median latency |
 |---|---|---|---|---|---|
 | Baseline: CLIP frame retrieval | 30.2% | 46.5% | 0.363 | 3.5 s | 25 ms |
-| This system, Fast depth | 34.9% | 74.4% | 0.501 | 0.0 s | 93 ms |
-| This system, Deep depth | **44.2%** | **79.1%** | **0.567** | **0.3 s** | 4.4 s |
+| This system, Fast depth | 34.9% | 76.7% | 0.509 | 0.0 s | 92 ms |
+| This system, Deep depth | **44.2%** | **79.1%** | **0.569** | **0.3 s** | 5.1 s |
 
 The gain is on activities (Hit@5 29.6% to 74.1%); on simple appearance queries the baseline is as good at Hit@1. Method,
 ablation, held-out split, latency and limitations are in **[WRITEUP.md](WRITEUP.md)**; reproduce with `node eval/eval.mjs`.

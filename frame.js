@@ -98,7 +98,7 @@ export function frame(cameraId, { ev = null, offset = 0, box = true, trail = fal
     <defs><filter id="pv"><feGaussianBlur stdDeviation="3.2"/></filter></defs>
     <rect x="-400" y="-400" width="1440" height="1600" fill="${BG}"/>
     <g transform="scale(1 ${ky})">${scene}
-    ${region ? `<rect x="${region.rect[0]}" y="${region.rect[1]}" width="${region.rect[2]}" height="${region.rect[3]}" fill="${ACC}" fill-opacity=".07" stroke="${ACC}" stroke-dasharray="4 3" vector-effect="non-scaling-stroke"/>` : ''}
+    ${region ? `<${region.shape?.length ? `polygon points="${region.shape.map(p => p.join(',')).join(' ')}"` : `rect x="${region.rect[0]}" y="${region.rect[1]}" width="${region.rect[2]}" height="${region.rect[3]}"`} fill="${ACC}" fill-opacity=".07" stroke="${ACC}" stroke-dasharray="4 3" vector-effect="non-scaling-stroke"/>` : ''}
     ${trail && ev ? `<polyline points="${[0, 0.25, 0.5, 0.75, 1].map(k => pointAt(ev, k).join(',')).join(' ')}" fill="none" stroke="${ACC}" stroke-opacity=".55" stroke-dasharray="2 4" vector-effect="non-scaling-stroke"/>` : ''}
     ${obj ? obj.svg : ''}
     ${obj && box ? (([x, y, w, h]) => `<g stroke="${ACC}" fill="none" vector-effect="non-scaling-stroke"><rect x="${x}" y="${y}" width="${w}" height="${h}" stroke-opacity=".7" stroke-width=".8" vector-effect="non-scaling-stroke"/>

@@ -44,6 +44,17 @@ function validRef(r, partial = false) {
     const g = r.region;
     if (!Array.isArray(g) || g.length !== 4 || g.some(n => !Number.isFinite(n) || n < 0) || g[0] + g[2] > 640 || g[1] + g[3] > 360 || g[2] < 4 || g[3] < 4) bad('region must be [x, y, w, h] inside 640x360');
     out.region = g.map(Math.round);
+    // a free-form outline: 3-200 points inside the frame; the stored rectangle becomes its bounding box. A new
+    // rectangle without one clears an old outline.
+    const s = r.shape;
+    if (s == null) out.shape = null;
+    else {
+      if (!Array.isArray(s) || s.length < 3 || s.length > 200 || s.some(p => !Array.isArray(p) || p.length !== 2 || !Number.isFinite(p[0]) || !Number.isFinite(p[1]) || p[0] < 0 || p[0] > 640 || p[1] < 0 || p[1] > 360)) bad('shape must be 3-200 [x, y] points inside 640x360');
+      out.shape = s.map(p => p.map(Math.round));
+      const xs = out.shape.map(p => p[0]), ys = out.shape.map(p => p[1]);
+      out.region = [Math.min(...xs), Math.min(...ys), Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)];
+      if (out.region[2] < 4 || out.region[3] < 4) bad('shape must be at least 4x4');
+    }
   }
   if (r.aliases != null) { if (!Array.isArray(r.aliases) || r.aliases.some(a => typeof a !== 'string' || a.length > 80)) bad('aliases must be strings'); out.aliases = r.aliases; }
   return out;
@@ -198,7 +209,7 @@ function startSearch({ text, scope = 'all', context = null, depth, ablation = {}
   const real = api.ds().source === 'mine';   // real footage: no simulated stage delays, and the local model verifies
   (real ? baseline.similarities(text) : Promise.resolve(null)).then(sm => api.search(text, { scope, context, depth, signal: run.ac.signal, onStage: s => push('stage', s),
     speed: real ? 0 : 1, sim: ablation.image !== false ? sm?.objects : null, frames: ablation.frames !== false ? sm?.frames : null,
-    labels: ablation.labels !== false, weights: ablation.weights && typeof ablation.weights === 'object' ? Object.fromEntries(Object.entries(ablation.weights).filter(([k, v]) => ['object', 'frame', 'labels', 'pass'].includes(k) && Number.isFinite(v))) : {}, verify: real && ablation.verify !== false ? (e, question) => indexer.verify(e, question) : null }))
+    labels: ablation.labels !== false, weights: ablation.weights && typeof ablation.weights === 'object' ? Object.fromEntries(Object.entries(ablation.weights).filter(([k, v]) => ['object', 'frame', 'labels', 'pass', 'kind'].includes(k) && Number.isFinite(v))) : {}, verify: real && ablation.verify !== false ? (e, question) => indexer.verify(e, question) : null }))
     .then(r => push('result', r))
     .catch(e => push(e.name === 'AbortError' ? 'cancelled' : 'fail', { message: e.message }));
   runs.set(id, run);

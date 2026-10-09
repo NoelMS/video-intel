@@ -121,11 +121,20 @@ export async function setSettings(patch) {
 
 // ---------- geometry ----------
 export const pointAt = (e, t) => [0, 1].map(i => e.path[0][i] + (e.path[1][i] - e.path[0][i]) * t);
-export function pathHits(e, [x, y, w, h]) {
-  for (let i = 0; i <= 20; i++) {
-    const [px, py] = pointAt(e, i / 20);
-    if (px >= x && px <= x + w && py >= y && py <= y + h) return true;
+// A referent's area: its rectangle, or a free-form outline (`shape`, points in frame space) when one was drawn; the
+// rectangle is then the outline's bounding box.
+export function inside([px, py], [x, y, w, h], shape = null) {
+  if (px < x || px > x + w || py < y || py > y + h) return false;
+  if (!shape?.length) return true;
+  let hit = false;   // ray casting
+  for (let i = 0, j = shape.length - 1; i < shape.length; j = i++) {
+    const [xi, yi] = shape[i], [xj, yj] = shape[j];
+    if ((yi > py) !== (yj > py) && px < (xj - xi) * (py - yi) / (yj - yi) + xi) hit = !hit;
   }
+  return hit;
+}
+export function pathHits(e, region, shape = null) {
+  for (let i = 0; i <= 20; i++) if (inside(pointAt(e, i / 20), region, shape)) return true;
   return false;
 }
 
@@ -148,10 +157,25 @@ export function coverageGaps(list, [a, b]) {
 }
 
 // ---------- query understanding ----------
+// The kind of vehicle a question names and the label words that count as it. Vehicles are named from a fixed list
+// (indexer.mjs: car, hatchback, saloon, estate, SUV, taxi, van, pickup, truck, lorry, bus) and unnamed tracks keep the
+// detector's class (car, truck, bus, motorcycle, bicycle). Before this, every kind collapsed into "vehicle", so "a red
+// truck" matched red cars. Most specific first: "pickup truck" is a pickup, "estate car" an estate. A car park is a place.
+const KINDS = [
+  ['SUV', /\bsuvs?\b/, ['suv']], ['taxi', /\b(taxis?|cabs?)\b/, ['taxi']], ['saloon', /\b(saloons?|sedans?)\b/, ['saloon', 'sedan']],
+  ['hatchback', /\bhatchbacks?\b/, ['hatchback']], ['estate car', /\bestate cars?\b/, ['estate']], ['pickup', /\bpick-?ups?\b/, ['pickup']],
+  ['van', /\b(mini)?vans?\b/, ['van']], ['truck', /\b(trucks?|lorry|lorries)\b/, ['truck', 'lorry', 'pickup']],
+  ['bus', /\b(bus|buses|coach|coaches|double-deckers?)\b/, ['bus']], ['motorcycle', /\b(motorcycles?|motorbikes?|mopeds?|scooters?)\b/, ['motorcycle']],
+  ['bicycle', /\b(bicycles?|bikes?)\b/, ['bicycle']],
+  ['car', /\b(cars?|automobiles?)\b(?! park)/, ['car', 'saloon', 'sedan', 'hatchback', 'estate', 'suv', 'taxi']],
+].map(([name, re, words]) => ({ name, re, words }));
+const kindOk = (e, k) => !k || k.words.some(w => e.attrs.includes(w));
 const ENTITY = {
-  vehicle: /\b(cars?|vehicles?|sedans?|vans?|suvs?|trucks?|hatchbacks?|automobiles?)\b/,
-  person: /\b(person|people|anyone|anybody|someone|somebody|who|man|woman|everyone|nobody)\b/,
+  vehicle: /\b(cars?(?! park)|vehicles?|sedans?|vans?|suvs?|trucks?|hatchbacks?|automobiles?)\b/,
+  person: /\b(person|people|anyone|anybody|someone|somebody|who|man|woman|everyone|nobody|riders?|cyclists?|motorcyclists?)\b/,
 };
+// "the scooter rider", "a cyclist": the person on it, who is tracked more reliably than a small two-wheeler under them
+const RIDER = /\b(riders?|cyclists?|motorcyclists?)\b/;
 const ATTRS = ['red', 'white', 'black', 'blue', 'grey', 'maroon', 'dark', 'sedan', 'van', 'suv', 'hatchback', 'bag', 'box', 'jacket', 'coat', 'large'];
 const CLOCK = '(\\d{1,2})(?:[:.](\\d{2}))?\\s*(am|pm)?';
 const toSec = (h, m, ap) => { h = +h; if (ap === 'pm' && h < 12) h += 12; if (ap === 'am' && h === 12) h = 0; return h * 3600 + +(m || 0) * 60; };
@@ -191,8 +215,9 @@ export function interpret(text, refs, context, vocab = vocabOf()) {
   // A vehicle named anywhere wins ("a person getting out of a car" searches cars): the car is large and tracked whole,
   // the person beside it small and half hidden. Measured (Hit@1, full pipeline): searching the person (the subject)
   // gave 37.2% vs 44.2% on all 43 queries; either kind 50.0% vs 59.1% on dev.
-  const entity = Object.keys(ENTITY).find(k => ENTITY[k].test(lc)) || null;
-  const attrs = vocab.filter(a => new RegExp(`\\b${a}\\b`).test(lc) && !Object.values(ENTITY).some(re => re.test(` ${a} `)));
+  const kind = KINDS.find(k => k.re.test(lc)) ?? null;
+  const entity = RIDER.test(lc) ? 'person' : kind ? 'vehicle' : Object.keys(ENTITY).find(k => ENTITY[k].test(lc)) || null;
+  const attrs = vocab.filter(a => new RegExp(`\\b${a}\\b`).test(lc) && !Object.values(ENTITY).some(re => re.test(` ${a} `)) && !KINDS.some(k => k.re.test(` ${a} `)));
   const ref = refs.find(r => [r.name, ...(r.aliases || [])].some(n => lc.includes(n.toLowerCase())));
   let location = ref ? { term: ref.name, ref } : null;
   if (!location) {
@@ -204,7 +229,7 @@ export function interpret(text, refs, context, vocab = vocabOf()) {
   const follow = context && /\b(it|this|that|they|them|he|she|the same)\b/.test(lc) ? context : null;
   const journey = /\bwhere (did|does|do|was|is|has)\b|\bfollow\b|\bjourney\b/.test(lc);
   return {
-    text, entity, attrs, location, follow,
+    text, entity, kind: kind && { name: kind.name, words: kind.words }, attrs, location, follow,
     crossing: /\b(pass(ed|es)?|through|enter(ed|s|ing)?|came in|went in|cross(ed|es|ing)?|across|over)\b/.test(lc),
     intent: journey ? 'journey' : !entity && !attrs.length && !follow && GENERIC.test(lc) ? 'activity' : 'find',
     ...timeWindow(lc),
@@ -220,6 +245,7 @@ const inWin = (e, [a, b]) => sec(e.time) >= a && sec(e.time) <= b;
 export function checks(e, q, win) {
   const out = [];
   if (q.entity) out.push([e.entity === q.entity, `Entity · ${e.entity}`]);
+  if (q.kind) out.push([kindOk(e, q.kind), `Kind · ${q.kind.name}`]);
   q.attrs.forEach(a => out.push([e.attrs.includes(a), `Attribute · ${a}`]));
   out.push([inWin(e, win), inWin(e, win) ? 'Inside requested window' : 'Outside requested window']);
   const ref = q.location?.ref;
@@ -227,7 +253,7 @@ export function checks(e, q, win) {
     const here = e.cameraId === ref.cameraId;
     out.push([here, `${here ? 'Observed' : 'Not observed'} on ${camera(ref.cameraId).code}`]);
     if (here && q.crossing) {
-      const hit = pathHits(e, ref.region);
+      const hit = pathHits(e, ref.region, ref.shape);
       out.push([hit, `${hit ? 'Crossed' : 'Did not cross'} ${ref.name} region`]);
     }
   }
@@ -265,7 +291,7 @@ export function assess(e, q, { cross = true } = {}) {
     ['Semantic match', level(e.conf.semantic)],
     ['Visual match', level(e.conf.visual)],
     ['Temporal fit', q && !inWin(e, [q.after ?? W[0], q.before ?? W[1]]) ? 'LOW' : 'HIGH'],
-    ['Location fit', !ref ? 'N/A' : e.cameraId !== ref.cameraId ? 'LOW' : pathHits(e, ref.region) ? 'HIGH' : 'MEDIUM'],
+    ['Location fit', !ref ? 'N/A' : e.cameraId !== ref.cameraId ? 'LOW' : pathHits(e, ref.region, ref.shape) ? 'HIGH' : 'MEDIUM'],
     ['Cross-camera link', !cross ? 'NOT CHECKED' : !tr.length ? 'NONE' : tr.some(t => t.strength === 'strong') ? 'HIGH' : 'MEDIUM'],
   ];
 }
@@ -299,7 +325,7 @@ export function matchWatch(w, e, refs) {
   const q = interpret(w.text, refs, null, watchVocabOf());
   if (q.location && !q.location.ref) return null;
   // a thing no label names ("an elephant") cannot be matched without the pictures; never fire on every object instead
-  if (q.intent === 'find' && !q.entity && !q.attrs.length && !q.location) return false;
+  if (q.intent === 'find' && !q.entity && !q.kind && !q.attrs.length && !q.location) return false;
   if (!inSchedule(sec(e.time), w) || (w.scope !== 'all' && w.scope !== e.cameraId)) return false;
   return checks(e, q, [q.after ?? 0, q.before ?? 86400]).every(c => c.ok);
 }
@@ -322,7 +348,7 @@ const wait = (ms, signal) => new Promise((res, rej) => {
 // - labels: the share of the query's attribute words in the object's label.
 // Words outside the label vocabulary still count through the pictures; known colours and kinds still sharpen the
 // ranking. Without embeddings (the demo), ranking is the label score as before. Weights tuned on the dev split only.
-export const OPEN_VOCAB = { object: 0.5, frame: 0, labels: 0.5, pass: 0.75 };   // frame 0: it picks each object's moment, but ranking by it hurt on dev (Hit@5 0.64 -> 0.41 at 0.2)
+export const OPEN_VOCAB = { object: 0.5, frame: 0, labels: 0.5, pass: 0.75, kind: 0.1 };   // frame 0: it picks each object's moment, but ranking by it hurt on dev (Hit@5 0.64 -> 0.41 at 0.2)
 const percentile = values => {
   const v = values.filter(x => x != null).sort((a, b) => a - b);
   return x => { let lo = 0, hi = v.length; while (lo < hi) { const m = (lo + hi) >> 1; v[m] < x ? lo = m + 1 : hi = m; } return v.length > 1 ? lo / (v.length - 1) : 1; };
@@ -330,7 +356,10 @@ const percentile = values => {
 export function openVocab(pool, q, sim, frames = null, weights = {}) {
   const W8 = { ...OPEN_VOCAB, ...weights };
   const attrsOk = e => q.attrs.every(a => e.attrs.includes(a));
-  if (!sim?.size && !frames?.size) return Object.assign(e => score(e), { pass: attrsOk });
+  // The vehicle kind only reorders: a label whose body word matches ("truck" for a truck) ranks `kind` higher. Requiring
+  // it lost the taxi, the white SUV and the scooter (labelled "black car", "white car"): the body word is the model's guess.
+  const bonus = e => q.kind && kindOk(e, q.kind) ? W8.kind : 0;
+  if (!sim?.size && !frames?.size) return Object.assign(e => score(e) + bonus(e), { pass: attrsOk });
   const po = sim?.size ? percentile(pool.map(e => sim.get(e.id))) : null, pf = frames?.size ? percentile(pool.map(e => frames.get(e.id)?.score)) : null;
   const share = e => q.attrs.length ? q.attrs.filter(a => e.attrs.includes(a)).length / q.attrs.length : null;
   const rank = e => {
@@ -341,7 +370,7 @@ export function openVocab(pool, q, sim, frames = null, weights = {}) {
     if (a != null) { s += W8.labels * a; w += W8.labels; }
     return w ? s / w : 0;
   };
-  return Object.assign(rank, { pass: e => (q.attrs.length > 0 && attrsOk(e)) || rank(e) >= W8.pass });
+  return Object.assign(e => rank(e) + bonus(e), { pass: e => (q.attrs.length > 0 && attrsOk(e)) || rank(e) >= W8.pass });
 }
 
 export async function search(text, { scope = 'all', context = null, depth, onStage = () => {}, signal, speed = 1, verify = null, sim = null, frames = null, labels = true, weights = {} } = {}) {
@@ -372,7 +401,7 @@ export async function search(text, { scope = 'all', context = null, depth, onSta
   await step('retrieval', `Indexed segments across ${searched.length} camera${searched.length === 1 ? '' : 's'}`, Math.floor(coveredSec / 10));
 
   const pool = D.events.filter(e => searched.some(c => c.id === e.cameraId));
-  const rank = openVocab(pool, labels ? q : { ...q, attrs: [] }, sim, frames, weights);
+  const rank = openVocab(pool, labels ? q : { ...q, attrs: [], kind: null }, sim, frames, weights);
   const semantic = pool.filter(e => (!q.entity || e.entity === q.entity) && (!q.follow || e.track === q.follow.track) && rank.pass(e))
     .sort((a, b) => rank(b) - rank(a)).slice(0, dp.topK);
   await step('semantic', `Semantic matches · top ${dp.topK === 999 ? 'all' : dp.topK}`, semantic.length);
@@ -385,7 +414,7 @@ export async function search(text, { scope = 'all', context = null, depth, onSta
   else await step('cross_camera', 'Skipped in fast mode', null, null, 0);
 
   const needCross = q.location && q.crossing && q.intent === 'find';
-  let verified = grounded.filter(e => !needCross || pathHits(e, q.location.ref.region));
+  let verified = grounded.filter(e => !needCross || pathHits(e, q.location.ref.region, q.location.ref.shape));
   const keep = new Set(verified.map(e => e.track));
   const rejected = semantic.filter(e => !keep.has(e.track) && !verified.includes(e))
     .filter((e, i, a) => a.findIndex(x => x.track === e.track) === i).slice(0, dk === 'deep' ? 6 : 3)
