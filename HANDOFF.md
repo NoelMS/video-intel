@@ -386,6 +386,13 @@ ES modules need an http origin. Opening `index.html` from disk will not work.
   - **Clip browser**: a camera captured as several clips (live cameras, archives) gets "Browse N clips" on its row, and the player gets Previous / Next and a list of every clip (`clipBar`, `clipsOf`).
   - Verified headlessly on a copy of the user's store (Highway + Edgware Way's 21 clips, on N:): Highway plays with 12 boxes on screen while 9 Oct is loaded; Browse opens clip 1 of 21 (Previous disabled), Next goes to 2, choosing 10 plays it with its 15 tracks. No page errors.
 - **Standing-query alert counts update live**: on the Live page the poll redrew only `#live-now` (so the watch form keeps its input), not the query cards in `#live-watches`, and it fetched alerts only when the count of ready clips changed, while the server writes alerts just after a clip is ready (after a visual check). A new alert notified but the card still said 0. Alerts are now fetched on every poll, `#live-watches` is redrawn on Live, and one more poll runs 10 s after the last clip is ready. Verified headlessly against the old and new `app.js` (test store on N:, a paused active camera, one clip re-indexed): old stayed at 0 with 2 alerts on the server, new showed 2 within 8 s.
+- **Standing queries on recorded videos**:
+  - The Cameras list in the query form had live cameras only; it now has "Live cameras" and "Recordings" groups (any ready upload or archive camera, by `cameraKey || id`, of any day; `validWatch` accepts them).
+  - "Also check recordings already indexed" (on by default) and a "Check recordings" button on each card run `POST watches/:id/check` (`checkRecordings` in server.mjs). Matches become alerts, the newest 100 per check (`CHECK_MAX`); the rest are counted in the reply and the toast ("530 matches in 1 recording · the newest 100 are listed"). Alerts are capped at 1,000 overall (was 200), deduplicated per query and object as before.
+  - Alerts now carry camera, label, clip, clip time, time and day, so "Show matches" on a card lists them and Play opens the clip at that moment, whatever day is loaded.
+  - `alertOn` (a clip finished indexing) matched against the latest day only, so an upload of an earlier day never alerted; `matchRecordings` uses each clip's own day (`indexer.dayOf`).
+  - The Live page without live cameras now still shows standing queries (for recordings).
+  - Verified headlessly on the test store (N:): the form offers Highway under Recordings; saving "Find a red car" for it checked the recording (530 matches, 1.4 s, 100 listed); Play opened Highway with 15 boxes on screen; a re-check added no duplicates; with the live camera removed, Live still shows the cards and the form. No page errors.
 
 ## Footage sources (researched)
 

@@ -81,7 +81,7 @@ const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
 function validWatch(b, partial = false) {
   const out = {};
   if (!partial || 'text' in b) { if (typeof b.text !== 'string' || !b.text.trim() || b.text.length > 300) bad('text must be 1-300 characters'); out.text = b.text.trim(); }
-  if (!partial || 'scope' in b) { if (b.scope !== 'all' && !api.camera(b.scope) && !sources.listFeeds().some(f => f.cameraKey === b.scope)) bad('unknown scope'); out.scope = b.scope; }
+  if (!partial || 'scope' in b) { if (b.scope !== 'all' && !api.camera(b.scope) && !sources.listFeeds().some(f => f.cameraKey === b.scope) && !indexer.listVideos().some(v => (v.cameraKey || v.id) === b.scope)) bad('unknown scope'); out.scope = b.scope; }
   for (const k of ['from', 'to']) if (!partial || k in b) { if (!HHMM.test(b[k])) bad(`${k} must be HH:MM`); out[k] = b[k]; }
   if ('status' in b) { if (!['active', 'paused'].includes(b.status)) bad('status must be active or paused'); out.status = b.status; }
   return out;
@@ -295,6 +295,7 @@ const routes = [
   ['GET', /^watches$/, () => api.getWatches()],
   ['POST', /^watches$/, async req => api.createWatch(validWatch(await body(req)))],
   ['PUT', /^watches\/([\w-]+)$/, async (req, [id]) => { await api.updateWatch(id, validWatch(await body(req), true)); return { ok: true }; }],
+  ['POST', /^watches\/([\w-]+)\/check$/, async (_, [id]) => { const w = (await api.getWatches()).find(x => x.id === id); if (!w) throw new HttpError(404, 'no such standing query'); return checkRecordings(w); }],
   ['DELETE', /^watches\/([\w-]+)$/, async (_, [id]) => { await api.deleteWatch(id); return { ok: true }; }],
   ['GET', /^alerts$/, () => api.getAlerts()],
   ['POST', /^search$/, async req => ({ id: startSearch(await body(req)) })],
@@ -343,14 +344,33 @@ export const activity = { busy: () => !!setup.busy() || indexer.busy() || source
 // Standing queries on real footage: each recording that finishes indexing (an upload, a live capture, an import) is
 // checked against every active watch, the same matching the replay uses. Alerts appear on the Live page.
 // Matched against the recordings' own dataset whatever is on screen (someone browsing the demo still gets alerts).
+// Standing queries against recordings, each on its own day (the latest day alone missed a clip from an earlier day).
+// Alerts carry what the card needs to show and play them whatever day is loaded.
+async function matchRecordings(vs, watches) {
+  const refs = await api.getMemory(), prev = api.ds(), hits = [], byDay = new Map();
+  for (const v of vs) byDay.set(indexer.dayOf(v), new Set([...(byDay.get(indexer.dayOf(v)) || []), v.id]));
+  try {
+    for (const [day, ids] of byDay) {
+      api.useDataset(indexer.dataset(day));
+      for (const e of api.ds().events.filter(e => ids.has(e.vid))) for (const w of watches) if (api.matchWatch(w, e, refs))
+        hits.push([w, e, { camera: api.camera(e.cameraId)?.name, label: e.label, vid: e.vid, vt: e.vt, time: e.time, day }]);
+    }
+  } finally { api.useDataset(prev); }   // restored before any await, so no request sees the swap
+  return hits;
+}
 async function alertOn(v) {
-  const refs = await api.getMemory(), watches = (await api.getWatches()).filter(w => w.status === 'active');
-  if (!watches.length) return;
-  const prev = api.ds(), hits = [];
-  api.useDataset(indexer.dataset());
-  try { for (const e of api.ds().events.filter(e => e.vid === v.id)) for (const w of watches) if (api.matchWatch(w, e, refs)) hits.push([w, e]); }
-  finally { api.useDataset(prev); }   // restored before any await, so no request sees the swap
-  for (const [w, e] of hits) await api.addAlert(w, e);
+  const watches = (await api.getWatches()).filter(w => w.status === 'active');
+  if (watches.length) for (const h of await matchRecordings([v], watches)) await api.addAlert(...h);
+}
+// A standing query run over the recordings already indexed. A busy recording can match thousands of objects ("a car" on
+// a motorway); the newest CHECK_MAX become alerts and the rest are counted.
+const CHECK_MAX = 100;
+async function checkRecordings(w) {
+  const vs = indexer.listVideos().filter(v => v.status === 'ready' && (w.scope === 'all' || (v.cameraKey || v.id) === w.scope));
+  const at = ([, , x]) => `${x.day} ${x.time}`, hits = (await matchRecordings(vs, [w])).sort((a, b) => at(b).localeCompare(at(a)));
+  let added = 0;
+  for (const h of hits.slice(0, CHECK_MAX)) if (await api.addAlert(...h)) added++;
+  return { recordings: vs.length, matches: hits.length, added, kept: Math.min(CHECK_MAX, hits.length) };
 }
 
 export function start(port = 0, storeFile = join(root, '.store', 'store.json'), host = '127.0.0.1') {

@@ -549,10 +549,12 @@ function retrack(v, frames, late) {
   if (tracked.get(v.id)?.k !== k) tracked.set(v.id, { k, tracks: track(frames, Math.max(3, 2.5 / (v.sampling || 0.5))) });
   return tracked.get(v.id).tracks;
 }
+// The day a recording is searched on (this computer's clock).
+export const dayOf = v => clockOf(v.start, ZONE).date;
 // One recording's tracked objects, from its own day (the player shows boxes for a recording of any day).
 export function videoEvents(id) {
   const v = get(id);
-  return v?.status === 'ready' ? dataset(clockOf(v.start, ZONE).date).events.filter(e => e.vid === id) : [];
+  return v?.status === 'ready' ? dataset(dayOf(v)).events.filter(e => e.vid === id) : [];
 }
 export function dataset(pick = null) {
   const all = listVideos().filter(v => v.status === 'ready').sort((a, b) => a.start.localeCompare(b.start));

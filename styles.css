@@ -454,6 +454,9 @@ dialog.palette { width: min(640px, 92vw); margin-top: 12vh; padding: 0; }
 .indexing li.done::before { content: '✓'; color: var(--ok); } .indexing li.run::before { content: '●'; color: var(--accent); }
 .indexing li.fail::before { content: '✕'; color: var(--err); } .indexing li.na { color: var(--muted); } .indexing li.na::before { content: '—'; }
 .indexing .bar { flex: 1; min-width: 120px; height: 2px; background: var(--line); position: relative; } .indexing .bar i { position: absolute; inset: 0 auto 0 0; background: var(--accent); }
+.watch .matches { margin: 8px 0 0; padding: 0; list-style: none; max-height: 260px; overflow: auto; font-size: 0.9em; }
+.watch .matches li { padding: 4px 0; border-top: 1px solid var(--line); }
+.watch-form .chk { display: flex; gap: 8px; align-items: center; margin: 4px 0 8px; }
 .clipnav { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 0 0 10px; }
 .clipnav select { max-width: 100%; }
 .vplay { position: relative; aspect-ratio: var(--ar); width: min(100%, calc(70vh * var(--ar))); margin: 0 auto 10px; background: #000; }

@@ -1180,14 +1180,27 @@ function liveView() {
   if (!feeds.length) return `<section class="page"><header class="page-h"><p class="eyebrow">LIVE</p><h1>No live cameras yet.</h1>
     <p class="lede">Live shows public or network cameras being captured now: London and California traffic cameras, or any RTSP/HLS stream. Uploaded recordings and archives stay on the Cameras page.</p>
     <div class="acts">${mode !== 'server' ? '<span class="dim">Live cameras need the local server: open Video Intelligence.exe.</span>'
-      : ds().DEMO ? '<button class="btn primary" data-act="source" data-src="mine">Switch to My footage</button>' : '<button class="btn primary" data-act="src-open" data-tab="tfl">Add live cameras</button>'}</div></header></section>`;
+      : ds().DEMO ? '<button class="btn primary" data-act="source" data-src="mine">Switch to My footage</button>' : '<button class="btn primary" data-act="src-open" data-tab="tfl">Add live cameras</button>'}</div></header>
+    ${mode === 'server' && !ds().DEMO ? watchesSection() : ''}</section>`;
   return `<section class="page"><header class="page-h"><p class="eyebrow">LIVE · ${S.ingest?.capturePaused ? 'all capture paused' : `${feeds.filter(f => f.active).length} of ${feeds.length} camera${feeds.length === 1 ? '' : 's'} capturing`}</p><h1>What the cameras see now.</h1>
     <p class="lede">Each camera is captured as clips while the app is open; every clip is analysed here and checked against your standing queries as soon as it is indexed.</p>
     <div class="acts">${pauseAllBtn()}</div></header>
     <div id="live-now">${liveNow()}</div>
-    <div class="live-grid">
+    ${watchesSection()}</section>`;
+}
+const watchesSection = () => `<div class="live-grid">
       <section><p class="eyebrow">STANDING QUERIES</p><ol class="watches" id="live-watches">${watchesList()}</ol>${watchForm()}</section>
-    </div></section>`;
+    </div>`;
+// a scope is a live camera or a recorded camera (an upload, or an archive camera's clips), of any day
+const scopeName = k => cam(k)?.name || (S.ingest?.feeds || []).find(f => f.cameraKey === k)?.name || S.videos.find(v => (v.cameraKey || v.id) === k)?.name;
+const recordedCams = () => { const live = liveKeys(), m = new Map();
+  for (const v of S.videos) if (v.status === 'ready' && !live.has(v.cameraKey || v.id)) m.set(v.cameraKey || v.id, v.name);
+  return [...m]; };
+// One match: from the alert itself (any day), else from the loaded day's event (alerts made before they carried it).
+function matchItem(a) {
+  const e = ev(a.eventId), x = { camera: a.camera ?? (e && cam(e.cameraId)?.name), label: a.label ?? e?.label, time: a.time ?? e?.time, vid: a.vid ?? e?.vid, vt: a.vt ?? e?.vt };
+  return `<li><span class="mono">${a.day ? esc(a.day) + ' ' : ''}${esc(x.time || '')}</span> · ${esc(x.camera || '')} · ${esc(x.label || '')}
+    ${x.vid ? `<button class="txt" data-act="play-orig" data-id="${x.vid}" data-t="${x.vt ?? 0}">Play</button>` : ''}</li>`;
 }
 const liveNow = () => {
   const keys = liveKeys(), recent = ds().DEMO ? [] : ds().events.filter(e => keys.has(e.cameraId)).sort((a, b) => sec(b.time) - sec(a.time)).slice(0, 30);
@@ -1205,17 +1218,23 @@ function watchState(w) {
 }
 const watchesList = () => S.watches.map(w => { const [st, term] = watchState(w), hits = S.alerts.filter(a => a.watchId === w.id).length;
   return `<li class="watch"><p class="wq">“${esc(w.text)}”</p><dl class="kv">
-    <div><dt>Status</dt><dd class="mono">${w.status.toUpperCase()} · ${st}</dd></div><div><dt>Scope</dt><dd>${w.scope === 'all' ? 'All cameras' : cam(w.scope) ? cam(w.scope).code + ' · ' + cam(w.scope).name : `<span class="dim">${esc(w.scope)} · not in this footage</span>`}</dd></div>
+    <div><dt>Status</dt><dd class="mono">${w.status.toUpperCase()} · ${st}</dd></div><div><dt>Scope</dt><dd>${w.scope === 'all' ? 'All cameras' : scopeName(w.scope) ? esc(scopeName(w.scope)) : `<span class="dim">${esc(w.scope)} · removed</span>`}</dd></div>
     <div><dt>Schedule</dt><dd class="mono">${w.from} → ${w.to}${sec(w.from + ':00') > sec(w.to + ':00') ? ' (overnight)' : ''}</dd></div><div><dt>Alerts</dt><dd>${hits}</dd></div></dl>
     <div class="acts"><button class="txt" data-act="watch-toggle" data-id="${w.id}">${w.status === 'active' ? 'Pause' : 'Resume'}</button>
-    ${term ? `<button class="txt" data-act="define-term" data-term="${esc(term)}">Define “${esc(term)}”</button>` : ''}<button class="txt danger" data-act="watch-del" data-id="${w.id}">Delete</button></div></li>`;
+    ${mode === 'server' && !ds().DEMO ? `<button class="txt" data-act="watch-check" data-id="${w.id}">Check recordings</button>` : ''}
+    ${hits ? `<button class="txt" data-act="watch-show" data-id="${w.id}" aria-expanded="${S.openWatch === w.id}">${S.openWatch === w.id ? 'Hide' : 'Show'} matches</button>` : ''}
+    ${term ? `<button class="txt" data-act="define-term" data-term="${esc(term)}">Define “${esc(term)}”</button>` : ''}<button class="txt danger" data-act="watch-del" data-id="${w.id}">Delete</button></div>
+    ${S.openWatch === w.id ? `<ol class="matches">${S.alerts.filter(a => a.watchId === w.id).map(matchItem).join('')}</ol>` : ''}</li>`;
 }).join('') || '<li class="dim">No standing queries.</li>';
 const watchForm = () => `<form class="watch-form" data-form="watch"><p class="eyebrow">NEW STANDING QUERY</p>
   <label class="fld">Watch for<input name="text" required maxlength="300" placeholder="A red bus"></label>
-  <label class="fld">Cameras<select name="scope"><option value="all">All cameras</option>${(S.ingest?.feeds || []).map(f => `<option value="${esc(f.cameraKey)}">${esc(f.name)}</option>`).join('')}</select></label>
+  <label class="fld">Cameras<select name="scope"><option value="all">All cameras</option>
+    ${(S.ingest?.feeds || []).length ? `<optgroup label="Live cameras">${S.ingest.feeds.map(f => `<option value="${esc(f.cameraKey)}">${esc(f.name)}</option>`).join('')}</optgroup>` : ''}
+    ${recordedCams().length ? `<optgroup label="Recordings">${recordedCams().map(([k, n]) => `<option value="${esc(k)}">${esc(n)}</option>`).join('')}</optgroup>` : ''}</select></label>
   <label class="fld">Active from<input type="time" name="from" value="00:00" required></label>
   <label class="fld">Until<input type="time" name="to" value="23:59" required></label>
-  <div class="acts"><button class="btn">Save standing query</button><span class="dim">Checked against every new capture as it is indexed.</span></div></form>`;
+  <label class="chk"><input type="checkbox" name="past" checked> Also check recordings already indexed</label>
+  <div class="acts"><button class="btn">Save standing query</button><span class="dim">Checked against every new capture or upload as it is indexed.</span></div></form>`;
 const alertsList = () => { const keys = liveKeys();
   return S.alerts.filter(a => ev(a.eventId) && keys.has(ev(a.eventId).cameraId)).map(a => { const e = ev(a.eventId);
     return `<li><p class="eyebrow warn">NEW EVENT · ${esc(cam(e.cameraId).name.toUpperCase())}</p><p class="mono">${e.time} ${ds().TZ}</p><p>${esc(e.label)}</p>
@@ -1230,11 +1249,22 @@ function notify(a) {
   $('#toasts').append(t); setTimeout(() => t.remove(), 9000);
 }
 
+// Run a standing query over the recordings already indexed; matches become alerts (the newest 100 of a busy recording).
+async function checkWatch(id) {
+  toast('Checking recordings…');
+  try {
+    const r = await api.checkWatch(id);
+    S.alerts = await api.getAlerts(); S.openWatch = r.matches ? id : S.openWatch; render();
+    toast(!r.recordings ? 'No indexed recordings in this scope yet' : !r.matches ? `No matches in ${r.recordings} recording${r.recordings === 1 ? '' : 's'}`
+      : `${r.matches} match${r.matches === 1 ? '' : 'es'} in ${r.recordings} recording${r.recordings === 1 ? '' : 's'}${r.matches > r.kept ? ` · the newest ${r.kept} are listed` : ''}`);
+  } catch (e) { toast(e.message); }
+}
 async function saveWatch(form) {
   const fd = new FormData(form);
   try {
-    await api.createWatch({ text: fd.get('text').trim(), scope: fd.get('scope'), from: fd.get('from'), to: fd.get('to') });
+    const w = await api.createWatch({ text: fd.get('text').trim(), scope: fd.get('scope'), from: fd.get('from'), to: fd.get('to') });
     S.watches = await api.getWatches(); toast('Standing query saved'); render();
+    if (fd.get('past')) await checkWatch(w.id);
   } catch (e) { toast(e.message); }
 }
 
@@ -1549,6 +1579,8 @@ const ACT = {
     await api.deleteVideo(d.id); S.videos = await api.getVideos(); await loadDataset(); clearSearch(); render();
   },
   'watch-toggle': async d => { const w = S.watches.find(x => x.id === d.id); await api.updateWatch(d.id, { status: w.status === 'active' ? 'paused' : 'active' }); S.watches = await api.getWatches(); render(); },
+  'watch-check': d => checkWatch(d.id),
+  'watch-show': d => { S.openWatch = S.openWatch === d.id ? null : d.id; render(); },
   'watch-del': async d => { if (!confirm('Delete this standing query? Its past alerts stay in the log.')) return; await api.deleteWatch(d.id); S.watches = await api.getWatches(); render(); },
   'define-term': d => openResolver({ name: d.term.replace(/\b\w/g, m => m.toUpperCase()), term: d.term }),
   diag: () => openLayer({ kind: 'diag' }),

@@ -46,6 +46,7 @@ export const addAudit = entry => j('audit', { method: 'POST', body: entry });
 export const getWatches = () => j('watches');
 export const createWatch = w => j('watches', { method: 'POST', body: w });
 export const updateWatch = (id, patch) => j('watches/' + id, { method: 'PUT', body: patch });
+export const checkWatch = id => j(`watches/${id}/check`, { method: 'POST', body: {} });
 export const deleteWatch = id => j('watches/' + id, { method: 'DELETE' });
 export const getAlerts = () => j('alerts');
 
