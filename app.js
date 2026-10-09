@@ -891,19 +891,25 @@ function pollVideos() {
   const tick = async () => {
     const readyBefore = S.videos.filter(v => v.status === 'ready').length;
     [S.videos, S.ingest] = await Promise.all([api.getVideos(), api.getIngest()]);
-    if (S.videos.filter(v => v.status === 'ready').length !== readyBefore && !ds().DEMO) {
-      await loadDataset();
-      // standing queries are checked on the server as each recording finishes indexing; say when one matched
-      const seen = new Set(S.alerts.map(a => a.id));
-      S.alerts = await api.getAlerts();
-      for (const a of S.alerts.filter(a => !seen.has(a.id))) ev(a.eventId) ? notify(a) : toast(`Alert · ${a.watchText}`);
-      if (!['cameras', 'live'].includes(S.view)) render();
-    }
+    const indexed = S.videos.filter(v => v.status === 'ready').length !== readyBefore && !ds().DEMO;
+    if (indexed) await loadDataset();
+    // Standing queries are checked on the server just after a recording is ready (with a visual check, seconds later),
+    // so alerts are fetched on every poll, not only when the ready count changes: a new one could miss that moment.
+    const seen = new Set(S.alerts.map(a => a.id)), alerts = ds().DEMO ? S.alerts : await api.getAlerts();
+    const fresh = alerts.filter(a => !seen.has(a.id));
+    if (fresh.length) { S.alerts = alerts; for (const a of fresh) ev(a.eventId) ? notify(a) : toast(`Alert · ${a.watchText}`); }
+    if ((indexed || fresh.length) && !['cameras', 'live'].includes(S.view)) render();
     if (S.view === 'cameras') $('#videos') ? ($('#videos').innerHTML = videosList()) : render();
-    if (S.view === 'live') $('#live-now') ? ($('#live-now').innerHTML = liveNow()) : render();   // the watch form keeps its input
+    if (S.view === 'live') {   // the watch form keeps its input: only the live panel and the query cards (their alert counts) redraw
+      $('#live-now') ? ($('#live-now').innerHTML = liveNow()) : render();
+      if ($('#live-watches')) $('#live-watches').innerHTML = watchesList();
+    }
     // keep polling while clips index, imports download, or live cameras capture
     if (S.videos.some(v => WORKING.includes(v.status)) || S.ingest.imports.some(i => ['queued', 'downloading'].includes(i.state)) || S.ingest.feeds.some(f => f.active || f.capturing)) videoPoll = setTimeout(tick, 3000);
-    else if (S.view === 'cameras') render();
+    else {
+      if (S.view === 'cameras') render();
+      if (indexed) videoPoll = setTimeout(tick, 10000);   // once more: the last clip's alerts are written after it is ready
+    }
   };
   tick();
 }

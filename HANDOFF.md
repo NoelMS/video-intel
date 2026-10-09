@@ -385,6 +385,7 @@ ES modules need an http origin. Opening `index.html` from disk will not work.
   - Indexes made before tracks were stored (no `tk`) were re-tracked on every day build (7 s for that clip). `retrack` now caches per clip until `detections.json` changes.
   - **Clip browser**: a camera captured as several clips (live cameras, archives) gets "Browse N clips" on its row, and the player gets Previous / Next and a list of every clip (`clipBar`, `clipsOf`).
   - Verified headlessly on a copy of the user's store (Highway + Edgware Way's 21 clips, on N:): Highway plays with 12 boxes on screen while 9 Oct is loaded; Browse opens clip 1 of 21 (Previous disabled), Next goes to 2, choosing 10 plays it with its 15 tracks. No page errors.
+- **Standing-query alert counts update live**: on the Live page the poll redrew only `#live-now` (so the watch form keeps its input), not the query cards in `#live-watches`, and it fetched alerts only when the count of ready clips changed, while the server writes alerts just after a clip is ready (after a visual check). A new alert notified but the card still said 0. Alerts are now fetched on every poll, `#live-watches` is redrawn on Live, and one more poll runs 10 s after the last clip is ready. Verified headlessly against the old and new `app.js` (test store on N:, a paused active camera, one clip re-indexed): old stayed at 0 with 2 alerts on the server, new showed 2 within 8 s.
 
 ## Footage sources (researched)
 
