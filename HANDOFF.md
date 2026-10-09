@@ -393,6 +393,7 @@ ES modules need an http origin. Opening `index.html` from disk will not work.
   - `alertOn` (a clip finished indexing) matched against the latest day only, so an upload of an earlier day never alerted; `matchRecordings` uses each clip's own day (`indexer.dayOf`).
   - The Live page without live cameras now still shows standing queries (for recordings).
   - Verified headlessly on the test store (N:): the form offers Highway under Recordings; saving "Find a red car" for it checked the recording (530 matches, 1.4 s, 100 listed); Play opened Highway with 15 boxes on screen; a re-check added no duplicates; with the live camera removed, Live still shows the cards and the form. No page errors.
+- **Search a recording of any day**: the Search page's Cameras list held only the loaded day's cameras, so a recording of another day (the 8 Oct "Highway" upload, with 9 Oct loaded) could not be chosen. The list now groups "Live cameras" and "Recordings" and adds "Recordings on other days" (`scopeOptions`): choosing one switches to its day, scopes the search to it and keeps the typed question (`scopeOtherDay`). Days are grouped on this computer's clock, as the server does. Verified headlessly on the test store (N:): with 9 Oct loaded, choosing "Highway · 8 Oct 2026" moved to 8 Oct with CAM 02 · Highway selected and the question kept; "Find a red car" returned 8 matches, all on Highway. No page errors.
 
 ## Footage sources (researched)
 

@@ -109,8 +109,7 @@ const composer = compact => `<form class="composer ${compact ? 'compact' : ''}" 
   <textarea id="q" name="q" rows="${compact ? 2 : 3}" placeholder="${ds().DEMO ? 'Did a red car pass through the main gate?' : 'Describe what you are looking for'}" autocomplete="off">${esc(S.query)}</textarea>
   <div class="composer-row">
     <label class="mono">CAMERAS <select name="scope">
-      <option value="all">All ${cams.length}</option>
-      ${cams.map(c => `<option value="${c.id}" ${S.scope === c.id ? 'selected' : ''}>${c.code} · ${c.name}${c.status === 'offline' ? ' (offline)' : ''}</option>`).join('')}
+      <option value="all">All ${cams.length}</option>${scopeOptions()}
     </select></label>
     <label class="mono">DEPTH <select name="depth" title="${esc(api.DEPTHS[S.depth ?? S.settings.depth].note)}">${Object.entries(api.DEPTHS).map(([k, d]) => `<option value="${k}" ${(S.depth ?? S.settings.depth) === k ? 'selected' : ''}>${d.label}</option>`).join('')}</select></label>
     ${S.phase === 'searching' ? '<button type="button" class="btn" data-act="cancel">Cancel search</button>' : '<button class="btn primary">Search</button>'}
@@ -1188,6 +1187,28 @@ function liveView() {
     <div id="live-now">${liveNow()}</div>
     ${watchesSection()}</section>`;
 }
+// Search scope: the loaded day's cameras, live and recorded apart, then recordings of other days (choosing one switches
+// to its day, since search covers one day at a time).
+const localDay = iso => new Date(iso).toLocaleDateString('en-CA');   // the server's day grouping uses this computer's zone
+function scopeOptions() {
+  const live = liveKeys(), opt = c => `<option value="${c.id}" ${S.scope === c.id ? 'selected' : ''}>${c.code} · ${esc(c.name)}${c.status === 'offline' ? ' (offline)' : ''}</option>`;
+  const group = (label, cs) => cs.length ? `<optgroup label="${label}">${cs.map(opt).join('')}</optgroup>` : '';
+  if (ds().DEMO) return cams.map(opt).join('');
+  const here = new Set(cams.map(c => c.id)), other = new Map();
+  for (const v of S.videos) {
+    const k = v.cameraKey || v.id, day = v.status === 'ready' && localDay(v.start);
+    if (day && !here.has(k) && !live.has(k) && day !== ds().DAY) other.set(`${k}|${day}`, { k, day, name: v.name });
+  }
+  const fmt = d => new Date(d + 'T12:00Z').toLocaleDateString('en-GB', { dateStyle: 'medium' });
+  return group('Live cameras', cams.filter(c => live.has(c.id))) + group('Recordings', cams.filter(c => !live.has(c.id)))
+    + (other.size ? `<optgroup label="Recordings on other days">${[...other.values()].sort((a, b) => b.day.localeCompare(a.day))
+      .map(o => `<option value="day:${o.day}:${esc(o.k)}">${esc(o.name)} · ${fmt(o.day)}</option>`).join('')}</optgroup>` : '');
+}
+async function scopeOtherDay(value) {
+  const [, day, ...k] = value.split(':'), key = k.join(':'), q = S.query;
+  await switchDay(day);
+  S.scope = cam(key) ? key : 'all'; S.query = q; render(); $('#q')?.focus();
+}
 const watchesSection = () => `<div class="live-grid">
       <section><p class="eyebrow">STANDING QUERIES</p><ol class="watches" id="live-watches">${watchesList()}</ol>${watchForm()}</section>
     </div>`;
@@ -1663,7 +1684,7 @@ document.addEventListener('change', e => {
   else if (t.dataset.move) moveCard(t.dataset.move, t.value, 999);
   else if (t.dataset.pick) { t.checked ? picked.add(t.dataset.pick) : picked.delete(t.dataset.pick); render(); $(`[data-pick="${t.dataset.pick}"]`)?.focus(); }
   else if (t.dataset.tog) { P[t.dataset.tog] = t.checked; drawFrame(); }
-  else if (t.name === 'scope') S.scope = t.value;
+  else if (t.name === 'scope') t.value.startsWith('day:') ? scopeOtherDay(t.value) : (S.scope = t.value);
 });
 
 // Evidence board drag and drop (keyboard equivalent: each card's lane menu and arrows).
