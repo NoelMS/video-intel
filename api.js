@@ -130,16 +130,19 @@ export function pathHits(e, [x, y, w, h]) {
 }
 
 // Gaps in recorded coverage inside a window. Offline cameras are reported, never silently searched.
+// Gaps under MIN_GAP s are left out: clips of one camera start a few seconds apart, and "21:30 -> 21:30 was not
+// searched" for a 1 s sliver is noise, not a coverage statement.
+const MIN_GAP = 10;
 export function coverageGaps(list, [a, b]) {
   const out = [];
   for (const c of list) {
     if (c.status === 'offline') { out.push({ cameraId: c.id, kind: 'offline', available: c.coverage }); continue; }
     let cur = a;
     for (const [s, e] of c.coverage.map(r => r.map(sec))) {
-      if (s > cur && cur < b) out.push({ cameraId: c.id, kind: 'gap', from: cur, to: Math.min(s, b) });
+      if (s > cur + MIN_GAP && cur < b) out.push({ cameraId: c.id, kind: 'gap', from: cur, to: Math.min(s, b) });
       cur = Math.max(cur, e);
     }
-    if (cur < b) out.push({ cameraId: c.id, kind: 'gap', from: cur, to: b });
+    if (cur + MIN_GAP < b) out.push({ cameraId: c.id, kind: 'gap', from: cur, to: b });
   }
   return out;
 }

@@ -1405,12 +1405,13 @@ function comparePanel(r) {
   if (ds().DEMO || !c || c.text !== S.query) return '';
   if (c.loading) return '<section class="basecmp"><p class="eyebrow">BASELINE FOR COMPARISON</p><p class="dim">Asking the baseline…</p></section>';
   if (c.error) return `<section class="basecmp"><p class="eyebrow">BASELINE FOR COMPARISON</p><p class="dim">${esc(c.error)}</p></section>`;
-  const base = c.baseline.results.map(x => ({ ...x, camera: cam(x.cameraId)?.name, time: absAt(x.vid, x.vt) })), a = c.answers;
+  // time: absolute, for marking against the labelled spans; clock: the same clock as every other time on the page
+  const base = c.baseline.results.map(x => ({ ...x, clock: x.time, camera: cam(x.cameraId)?.name, time: absAt(x.vid, x.vt) })), a = c.answers;
   const kb = a ? hitRank(base, a.answers) : null, ko = a ? hitRank(oursRanked(r), a.answers) : null;
   return `<section class="basecmp"><p class="eyebrow">BASELINE FOR COMPARISON · plain CLIP frame retrieval on the same footage</p>
     ${a ? `<p class="known">This question has a known answer (${esc(a.source)}, ${a.split === 'heldout' ? 'held-out' : 'development'} set). <span>This system: ${mark(ko)}</span> <span>Baseline: ${mark(kb)}</span></p>`
       : '<p class="dim">This question is not in the evaluation set, so there is no known answer to mark: compare the two by eye. The measured comparison over 43 questions is on the System page.</p>'}
-    <ol class="base-list">${base.map((x, i) => `<li>${x.vid ? `<img loading="lazy" src="api/videos/${x.vid}/frames/${x.n}" alt="">` : ''}<span class="mono">#${i + 1} ${esc(cam(x.cameraId)?.code || '')} · ${x.time ? new Date(x.time).toLocaleTimeString('en-GB', { timeZone: cam(x.cameraId)?.tz }) : x.time} · similarity ${x.score.toFixed(3)}</span>${a ? `<span>${hitRank([x], a.answers) === 0 ? '<b class="ok">✓</b>' : '<b class="warn">✗</b>'}</span>` : ''}</li>`).join('')}</ol>
+    <ol class="base-list">${base.map((x, i) => `<li>${x.vid ? `<img loading="lazy" src="api/videos/${x.vid}/frames/${x.n}" alt="">` : ''}<span class="mono">#${i + 1} ${esc(cam(x.cameraId)?.code || '')} · ${esc(x.clock || '')} · similarity ${x.score.toFixed(3)}</span>${a ? `<span>${hitRank([x], a.answers) === 0 ? '<b class="ok">✓</b>' : '<b class="warn">✗</b>'}</span>` : ''}</li>`).join('')}</ol>
     <p class="dim">The baseline ranks whole frames, one per second, by similarity to the question. It has no objects, tracks, labels, places or visual check, so it cannot say which thing in the frame it means.</p></section>`;
 }
 

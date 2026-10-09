@@ -640,6 +640,7 @@ dialog.capture { width: min(560px, 96vw); } dialog.capture .ev-top .txt { white-
 
 .feeds-h { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
 
+.sys-sec { margin-bottom: 40px; }
 .basecmp { margin-top: 32px; padding-top: 16px; border-top: 1px solid var(--line-strong); }
 .basecmp .known { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 6px 0 12px; }
 .basecmp .ok { color: var(--ok); } .basecmp .warn { color: var(--warn); }

@@ -59,6 +59,9 @@ assert.equal(api.inSchedule(api.sec('23:00:00'), { from: '20:00', to: '06:00' })
 // a thing no label names is a find (refused by the checks), never "what happened"; a watch for it never fires
 assert.equal(api.interpret('Find an elephant', []).intent, 'find');
 assert.equal(api.interpret('What happened after 9:40?', []).intent, 'activity');
+// a clip starting 5 s late is not an unsearched gap; one starting a minute late is
+assert.equal(api.coverageGaps([{ id: 'c', coverage: [['10:00:05', '10:05:00']] }], [36000, 36300]).length, 0);
+assert.equal(api.coverageGaps([{ id: 'c', coverage: [['10:01:00', '10:05:00']] }], [36000, 36300]).length, 1);
 // a vehicle named anywhere is the search target (measured: see interpret)
 assert.equal(api.interpret('Find a person getting out of a car', []).entity, 'vehicle');
 // a specific place is asked about; "the door of a building" is any door

@@ -49,7 +49,8 @@ All from real public camera footage (TfL JamCams, London) indexed on this comput
 | ![Evidence](docs/screenshots/03-evidence.png) **Evidence: frame, object, time and the checks behind it** | ![Playback](docs/screenshots/04-playback.png) **Playback with every tracked object boxed and labelled** |
 | ![Cameras](docs/screenshots/05-cameras.png) **Live public cameras and indexed recordings** | ![Add live cameras](docs/screenshots/06-add-live-cameras.png) **Pick from ~890 London and California cameras** |
 | ![Capture now](docs/screenshots/07-capture-now.png) **Capture now, for as long as you choose** | ![Setup](docs/screenshots/08-setup.png) **One-click local setup: ffmpeg, Ollama, detector, model** |
-| ![System](docs/screenshots/09-system.png) **Index coverage, search depth, privacy** | |
+| ![System](docs/screenshots/09-system.png) **Index coverage, search depth, privacy** | ![Benchmark](docs/screenshots/11-benchmark.png) **The measured benchmark, on the System page** |
+| ![Baseline comparison](docs/screenshots/10-baseline-compare.png) **Every answer shows the baseline's top 5 beside it; a question with a known answer marks both (here: ours right first, the baseline at #5)** | |
 
 The app also ships a synthetic seven-camera demo (the **Demo** switch in the header) for trying it without footage.
 
