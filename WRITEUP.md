@@ -122,6 +122,9 @@ word the app asks about; the final-code rows are measured on the reworded set.
     model judges a sequence worse than one clear still.
   - Verifying the frame at the object's best-matching moment instead of its representative (largest) sighting: 50.0%.
   - Lowering the candidate gate (`pass` 0.75 to 0.6 or 0.5): no change.
+  - Searching for the grammatical subject of "a person getting out of a car" (the person) rather than the vehicle:
+    Hit@1 44.2% to 37.2% on all 43 queries; allowing either kind: 50.0% on dev. The car is large and tracked whole;
+    the person beside it is small and half hidden. A vehicle named anywhere stays the search target.
   - Asking for a shorter reason (6 words, not 12): one answer flipped, no measurable speed-up. Any prompt change moves
     the model's answers, so prompts are only changed with a dev run.
 

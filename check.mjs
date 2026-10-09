@@ -59,6 +59,8 @@ assert.equal(api.inSchedule(api.sec('23:00:00'), { from: '20:00', to: '06:00' })
 // a thing no label names is a find (refused by the checks), never "what happened"; a watch for it never fires
 assert.equal(api.interpret('Find an elephant', []).intent, 'find');
 assert.equal(api.interpret('What happened after 9:40?', []).intent, 'activity');
+// a vehicle named anywhere is the search target (measured: see interpret)
+assert.equal(api.interpret('Find a person getting out of a car', []).entity, 'vehicle');
 // a specific place is asked about; "the door of a building" is any door
 assert.equal(api.interpret('Did a white van cross the junction?', []).location?.term, 'junction');
 assert.equal(api.interpret('Find a person opening the door of a building', []).location, null);
