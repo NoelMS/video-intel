@@ -541,6 +541,19 @@ const camKey = v => v.cameraKey || v.id;
 // 17:00 and a California capture made at the same moment at 09:00 on one axis, so the window spanned both and every
 // camera reported the other's hours as unsearched gaps. (Recording lists and playback still show each camera's zone.)
 const ZONE = Intl.DateTimeFormat().resolvedOptions().timeZone;
+// Indexes made before tracks were stored (no `tk`) are tracked again whenever a day is built: 7 s for a 34-minute clip,
+// on every live clip that finishes. Kept per clip until its detections change.
+const tracked = new Map();
+function retrack(v, frames, late) {
+  const k = `${v.id}:${statSync(detFile(v.id)).mtimeMs}:${late}`;
+  if (tracked.get(v.id)?.k !== k) tracked.set(v.id, { k, tracks: track(frames, Math.max(3, 2.5 / (v.sampling || 0.5))) });
+  return tracked.get(v.id).tracks;
+}
+// One recording's tracked objects, from its own day (the player shows boxes for a recording of any day).
+export function videoEvents(id) {
+  const v = get(id);
+  return v?.status === 'ready' ? dataset(clockOf(v.start, ZONE).date).events.filter(e => e.vid === id) : [];
+}
 export function dataset(pick = null) {
   const all = listVideos().filter(v => v.status === 'ready').sort((a, b) => a.start.localeCompare(b.start));
   const dateOf = v => clockOf(v.start, ZONE).date, days = [...new Set(all.map(dateOf))].sort().reverse();
@@ -562,7 +575,7 @@ export function dataset(pick = null) {
       const frames = (existsSync(detFile(v.id)) ? JSON.parse(readFileSync(detFile(v.id), 'utf8')) : []).map(f => ({ ...f, t: f.t + late }));
       cam.coverage.push([t0 + off, t0 + off + v.duration]);
       cam.frames.push(...frames.map(f => ({ n: f.n, v: v.id, t: +(off + f.t).toFixed(2), faces: f.faces, plates: f.plates })));
-      (storedTracks(frames) ?? track(frames, Math.max(3, 2.5 / (v.sampling || 0.5)))).forEach((tr, i) => {
+      (storedTracks(frames) ?? retrack(v, frames, late)).forEach((tr, i) => {
         const k = tr.tk ?? i;
         const ds = tr.dets, rep = ds.reduce((a, b) => b.box[2] * b.box[3] > a.box[2] * a.box[3] ? b : a);
         const c = d => [+(d.box[0] + d.box[2] / 2).toFixed(1), +(d.box[1] + d.box[3] / 2).toFixed(1)];   // box centre

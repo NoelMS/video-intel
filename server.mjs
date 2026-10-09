@@ -284,6 +284,7 @@ const routes = [
   ['DELETE', /^imports$/, () => { sources.clearImports(); return ingest(); }],
   ['GET', /^videos$/, () => indexer.listVideos()],
   ['POST', /^videos$/, (req, _, url) => indexer.addVideo(req, validUpload(url.searchParams, (req.headers['content-type'] || '').split(';')[0].trim()))],
+  ['GET', /^videos\/([\w-]+)\/events$/, (_, [id]) => indexer.videoEvents(id)],
   ['POST', /^videos\/([\w-]+)\/reindex$/, (_, [id]) => { indexer.reindex(id); return { ok: true }; }],
   ['DELETE', /^videos\/([\w-]+)$/, (_, [id]) => { indexer.removeVideo(id); return { ok: true }; }],
   ['GET', /^setup$/, async () => setup.status((await api.getSettings()).vision.model)],

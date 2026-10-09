@@ -8,6 +8,7 @@ const j = async (path, { method = 'GET', body } = {}) => {
 };
 
 export const getCameras = () => j('cameras');
+export const videoEvents = id => j(`videos/${id}/events`);
 export const getEvents = cameraId => j(cameraId ? `cameras/${cameraId}/events` : 'events');
 export const getMemory = () => j('memory');
 export const createMemory = r => j('memory', { method: 'POST', body: r });

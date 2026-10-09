@@ -866,7 +866,7 @@ function cameraClips(vs) {
       <p class="mono dim">${ready.length} indexed${waiting ? ` · ${waiting} waiting` : ''}${failed.length ? ` · ${failed.length} failed` : ''}${latest ? ` · latest ${new Date(latest.start).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'medium', timeZone: latest.tz })}` : ''}</p>
       ${work ? `<div class="vstate"><span class="mono">${VSTATE[work.status]}${p.total ? ` · ${counted(work, p)}` : ''}</span><span class="bar"><i style="width:${p.total ? Math.round(p.done / p.total * 100) : 0}%"></i></span></div>` : ''}
       ${failed.length ? `<p class="warn">${esc(failed.at(-1).error || 'Failed')}</p>` : ''}
-      <div class="acts">${latest ? `<button class="txt" data-act="play-orig" data-id="${latest.id}" data-t="0">Play latest clip</button>` : ''}
+      <div class="acts">${latest ? `<button class="txt" data-act="play-orig" data-id="${latest.id}" data-t="0">Play latest clip</button>${ready.length > 1 ? `<button class="txt" data-act="play-orig" data-id="${ready[0].id}" data-t="0">Browse ${ready.length} clips</button>` : ''}` : ''}
         <button class="txt danger" data-act="camera-del" data-key="${esc(vs[0].cameraKey)}">Remove camera</button></div></div></li>`;
 }
 function recordingRow(v) {
@@ -1072,16 +1072,27 @@ function ingestPanel() {
 
 // Playback of a recording, with the indexed tracks drawn over it (or the original picture alone).
 const V = { evs: [], det: true, gap: 2 };
+// A camera captured as many clips (live cameras, archives): step through them in the player.
+const clipsOf = v => v?.cameraKey ? S.videos.filter(x => x.cameraKey === v.cameraKey && x.status === 'ready').sort((a, b) => a.start.localeCompare(b.start)) : [];
+function clipBar(v) {
+  const cs = clipsOf(v), i = cs.findIndex(x => x.id === v?.id);
+  if (cs.length < 2 || i < 0) return '';
+  const at = x => new Date(x.start).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'medium', timeZone: x.tz });
+  const go = (x, l) => `<button class="btn" data-act="play-orig" data-id="${x?.id ?? ''}" data-t="0" ${x ? '' : 'disabled'}>${l}</button>`;
+  return `<div class="clipnav">${go(cs[i - 1], '‹ Previous clip')}
+    <label class="mono">Clip <select data-clip aria-label="Choose a clip">${cs.map((x, k) => `<option value="${x.id}" ${k === i ? 'selected' : ''}>${k + 1} of ${cs.length} · ${esc(at(x))} · ${hmsDur(x.duration || 0)}</option>`).join('')}</select></label>
+    ${go(cs[i + 1], 'Next clip ›')}</div>`;
+}
 function videoLayer({ id, t = 0, det = true }) {
   const c = cam(id) ?? S.videos.find(v => v.id === id), sv = S.videos.find(v => v.id === id);
-  V.evs = allEvents.filter(e => (e.vid ?? e.cameraId) === id && e.dets?.length);   // this clip's tracks
+  V.evs = (V.other?.id === id ? V.other.evs : allEvents).filter(e => (e.vid ?? e.cameraId) === id && e.dets?.length);   // this clip's tracks
   V.det = det && V.evs.length > 0; V.gap = 1 / (sv?.sampling || 0.5);
   const seg = ([m, l]) => `<button data-act="vmode" data-m="${m}" aria-pressed="${(m === 'det') === V.det}" ${m === 'det' && !V.evs.length ? 'disabled title="Not indexed yet"' : ''}>${l}</button>`;
   requestAnimationFrame(followVideo);
   return `<header class="ev-top"><p class="eyebrow">RECORDING · ${esc(c.name)}</p>
       <div><span class="mode" role="group" aria-label="Playback">${[['det', 'With detections'], ['orig', 'Original']].map(seg).join('')}</span>
       <button class="txt" data-act="close">Close · Esc</button></div></header>
-    <h2 class="sr-only">${esc(c.name)} recording</h2>
+    <h2 class="sr-only">${esc(c.name)} recording</h2>${clipBar(sv)}
     <div class="vfs" id="vfs"><div class="vplay" style="--ar:${c.width || 16}/${c.height || 9}">
       <video id="vplay" src="api/videos/${id}/play#t=${Math.max(0, +t - 3)}" controls controlslist="nofullscreen" disablepictureinpicture autoplay muted playsinline
         onerror="this.closest('.vfs').outerHTML='<p class=&quot;warn&quot;>This recording cannot be played. Re-index it to make a browser-playable copy.</p>'"></video>
@@ -1516,7 +1527,12 @@ const ACT = {
     S.videos = await api.getVideos(); await loadDataset(); clearSearch(); render();
   },
   source: d => switchSource(d.src),
-  'play-orig': d => openLayer({ kind: 'video', id: d.id, t: +d.t, det: d.det !== '0' }),
+  'play-orig': async d => {
+    // the loaded day's tracks cover only that day; a recording of another day fetches its own
+    if (mode === 'server' && !allEvents.some(e => e.vid === d.id) && S.videos.find(v => v.id === d.id)?.status === 'ready')
+      V.other = { id: d.id, evs: await api.videoEvents(d.id).catch(() => []) };
+    openLayer({ kind: 'video', id: d.id, t: +d.t, det: d.det !== '0' });
+  },
   vmode: (d, b) => { V.det = d.m === 'det'; $$('[data-act=vmode]').forEach(x => x.setAttribute('aria-pressed', x === b)); drawBoxes($('#vplay')?.currentTime ?? 0); },
   // The picture and its boxes go full screen together; the video's own full screen would leave the boxes behind.
   vfull: () => document.fullscreenElement ? document.exitFullscreen() : $('#vfs')?.requestFullscreen(),
@@ -1599,6 +1615,7 @@ document.addEventListener('change', e => {
   const t = e.target;
   if (t.id === 'speed') P.speed = +t.value;
   else if (t.dataset.day !== undefined) switchDay(t.value);
+  else if (t.dataset.clip !== undefined) ACT['play-orig']({ id: t.value, t: '0' });
   else if (t.dataset.pickCam) { t.checked ? SRC.sel.set(t.dataset.pickCam, 1) : SRC.sel.delete(t.dataset.pickCam); drawSources(); }
   else if (t.dataset.srcInterval !== undefined) { SRC.interval = +t.value; drawSources(); }
   else if (t.dataset.srcClip !== undefined) { SRC.clipSec = +t.value; drawSources(); }
