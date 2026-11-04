@@ -94,6 +94,7 @@ export const WORKING = ['queued', 'transcoding', 'extracting', 'analyzing', 'nam
 // tracking is more accurate (association F1 0.90 vs 0.82 at 2 fps), and playback boxes are at most 0.2 s old. The
 // vision model alone is not, so it keeps the configured rate.
 const rate = () => !opts.describe && setup.detectorOk() ? Math.max(5, opts.sampling) : opts.sampling;
+const pick = r => `select='isnan(prev_selected_t)+gt(floor(t*${r}),floor(prev_selected_t*${r}))'`;   // the frames sampled: stored JPEGs and native tiles alike
 export function backlog() {
   const all = listVideos(), wait = all.filter(v => WORKING.includes(v.status)), speed = all.filter(v => v.secPerFrame).slice(-10);
   const secPerFrame = speed.length ? speed.reduce((n, v) => n + v.secPerFrame, 0) / speed.length : null;
@@ -147,7 +148,7 @@ async function index(v) {
     // 2 fps, measured by matching pixels): boxes ran ahead of the objects in playback.
     const r = rate();
     await run(setup.ffmpegPath(), ['-hide_banner', '-nostats', '-i', videoFile(v), '-an',
-      '-vf', `select='isnan(prev_selected_t)+gt(floor(t*${r}),floor(prev_selected_t*${r}))',${fast ? '' : 'mpdecimate,'}scale='min(768,iw)':-2,showinfo`, '-fps_mode', 'vfr', '-q:v', '4', join(fdir, '%06d.jpg')],
+      '-vf', `${pick(r)},${fast ? '' : 'mpdecimate,'}scale='min(768,iw)':-2,showinfo`, '-fps_mode', 'vfr', '-q:v', '4', join(fdir, '%06d.jpg')],
     line => {
       const m = line.match(/\bpts_time:\s*([\d.]+)/);
       if (m) { times.push(+m[1]); if (times.length % 10 === 0) put({ ...get(v.id), progress: { done: Math.round(+m[1]), total: Math.round(v.duration) } }); }
@@ -191,14 +192,20 @@ async function indexWithDetector(v, fdir, frames) {
   const began = Date.now(), [W, H] = (await run(setup.ffprobePath(), ['-v', 'error', '-show_entries', 'stream=width,height', '-of', 'csv=p=0', frameFile(v.id, 1)])).trim().split(',').map(Number);
   put({ ...get(v.id), status: 'analyzing', model: opts.model, detector: `YOLOX-S (${detector.status().provider})`, sampling: rate(), progress: { done: 0, total: frames.length } });
   const dets = [];
+  // wide views (>= 1600 px) are also searched tile by tile at full resolution for far-away people (detector.detectTiles)
+  const [SW, SH] = (await run(setup.ffprobePath(), ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of', 'csv=p=0', videoFile(v)])).trim().split(',').map(Number);
+  const native = SW >= 1600 && process.env.VI_TILES === '1' ? detector.nativeFrames(setup.ffmpegPath(), videoFile(v), pick(rate()), SW, SH) : null;
+  if (native) put({ ...get(v.id), tiles: true });
   for await (const px of detector.frames(setup.ffmpegPath(), join(fdir, '%06d.jpg'))) {
     if (current.cancelled) return;
     const f = frames[dets.length];
     if (!f) break;
-    const objects = (await detector.detect(px, W, H)).map(o => ({ type: o.type, label: o.cls, cls: o.cls, score: o.score, box: o.box, action: '' }));
+    const whole = await detector.detect(px, W, H), nat = native && (await native.next()).value;
+    const objects = (nat ? await detector.detectTiles(nat, SW, SH, whole) : whole).map(o => ({ type: o.type, label: o.cls, cls: o.cls, score: o.score, box: o.box, action: '' }));
     dets.push({ ...f, objects, ...privacyBoxes(objects), lighting: detector.lighting(px, W, H) });
     if (dets.length % 10 === 0) put({ ...get(v.id), progress: { done: dets.length, total: frames.length } });
   }
+  await native?.return();
   // detector class names flip (car/truck), so they are not compared; boxes are steady enough for tighter limits
   const tracks = track(dets, 2, { labels: false, gate: 0.75, size: true });
   tracks.forEach((tr, k) => { for (const d of tr.dets) d.src.tk = k; });

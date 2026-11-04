@@ -2,7 +2,9 @@
 
 Ask questions about recorded multi-camera footage in plain English — *"Did a red car pass through the main gate?"* — and get back **which camera, when, and the visual evidence**, with the reasoning shown.
 
-Built for problem statement **HNX26EPS05: Multi-Stream Video Intelligence with Conversational Query**. Everything runs locally: no cloud calls, no npm dependencies.
+Built for problem statement **HNX26EPS05: Multi-Stream Video Intelligence with Conversational Query** (awarded 9th place overall at the HackNex National Hackathon). Everything runs locally: no cloud calls, no npm dependencies.
+
+https://github.com/user-attachments/assets/demo (Video preview: see `docs/brag.mp4`)
 
 ![Playback of a real London traffic camera with tracked, labelled objects](docs/screenshots/playback.gif)
 
@@ -86,7 +88,7 @@ ES modules need an http origin, so opening `index.html` from disk does not work.
 | [WILDTRACK](https://www.epfl.ch/labs/cvlab/data/data-wildtrack/) | 7 overlapping HD cameras, pedestrians, calibrated | Free download |
 | CamNeT | 5-8 non-overlapping campus cameras with trajectories | Research dataset |
 
-TfL, Caltrans, any HLS/RTSP/MP4 stream URL, MEVA and plain video-URL lists are built in: **Cameras → Add live cameras / Import an archive**. Live cameras are captured as short clips on an interval while the app is open; each camera's clips are searched as one camera, one day at a time (pick the day in the header). Details and caveats are in [HANDOFF.md](HANDOFF.md#footage-sources-researched).
+TfL, Caltrans, any HLS/RTSP/MP4 stream URL, MEVA and plain video-URL lists are built in: **Cameras → Add live cameras / Import an archive**. Live cameras are captured as short clips on an interval while the app is open; each camera's clips are searched as one camera, one day at a time (pick the day in the header).
 
 ## Two data sources
 

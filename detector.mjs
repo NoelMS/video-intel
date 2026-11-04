@@ -90,6 +90,45 @@ export async function detect(bgr, w, h) {
   }).filter(o => o.box[2] > 2 && o.box[3] > 2);
 }
 
+// Native-resolution frames of a video as BGR, the same frames as the stored JPEG sequence (same select filter, no scaling),
+// for tiled detection of far-away people.
+export async function* nativeFrames(ffmpeg, input, select, w, h) {
+  const p = spawn(ffmpeg, ['-hide_banner', '-v', 'error', '-i', input, '-an', '-vf', select, '-fps_mode', 'vfr', '-f', 'rawvideo', '-pix_fmt', 'bgr24', 'pipe:1'],
+    { windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
+  const N = w * h * 3;
+  let buf = Buffer.alloc(0);
+  for await (const chunk of p.stdout) {
+    buf = Buffer.concat([buf, chunk]);
+    while (buf.length >= N) { yield buf.subarray(0, N); buf = buf.subarray(N); }
+  }
+}
+
+// Far-away people are ~10 px tall in the 640 px detector input of a 1920 px wide view and are not found (MEVA G339:
+// 3 of 113 people). Detecting on 640x540 tiles of the native frame finds them (7-8 of 15-19 per busy frame, against
+// 0-2). Objects in `whole` (the normal pass) win; a tile box touching an inner tile edge is probably cut in two and is
+// dropped (the whole-frame pass has the large objects that cross tiles).
+// Note: tiles do not overlap, so a small person exactly on a tile edge is missed; overlapping tiles cost ~2x more.
+export async function detectTiles(native, w, h, whole) {
+  const TW = 640, TH = Math.min(540, h), out = [...whole], tile = Buffer.alloc(SIZE * SIZE * 3, 0x72);
+  const corners = k => [k.box[0], k.box[1], k.box[0] + k.box[2], k.box[1] + k.box[3]];
+  for (let y0 = 0; y0 < h; y0 += TH) for (let x0 = 0; x0 < w; x0 += TW) {
+    const tw = Math.min(TW, w - x0), th = Math.min(TH, h - y0);
+    if (tw < 64 || th < 64) continue;
+    tile.fill(0x72);
+    for (let y = 0; y < th; y++) native.copy(tile, y * SIZE * 3, ((y0 + y) * w + x0) * 3, ((y0 + y) * w + x0 + tw) * 3);
+    for (const o of await detect(tile, SIZE, SIZE)) {
+      // detect maps the 640x640 tile to 640x360: back to tile pixels, then to the frame's 640x360 space
+      const [x, y, bw, bh] = [o.box[0], o.box[1] * SIZE / 360, o.box[2], o.box[3] * SIZE / 360];
+      if (x >= tw || y >= th) continue;
+      if ((x0 > 0 && x < 2) || (y0 > 0 && y < 2) || (x0 + tw < w && x + bw > tw - 2) || (y0 + th < h && y + bh > th - 2)) continue;
+      const box = [(x0 + x) * 640 / w, (y0 + y) * 360 / h, Math.min(bw, tw - x) * 640 / w, Math.min(bh, th - y) * 360 / h].map(n => +n.toFixed(1)), b = corners({ box });
+      if (out.some(k => k.type === o.type && (iou(b, corners(k)) > 0.4 || inter(b, corners(k)) / area(b) > 0.7))) continue;
+      out.push({ ...o, box });
+    }
+  }
+  return out.filter(o => o.box[2] > 1 && o.box[3] > 1);
+}
+
 // Mean brightness of the picture area (not the grey padding), for the frame's lighting.
 export function lighting(bgr, w, h) {
   const r = Math.min(SIZE / w, SIZE / h), W = Math.round(w * r), H = Math.round(h * r);
